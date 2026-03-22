@@ -381,8 +381,11 @@ main {
   <span class="header-spacer"></span>
   <div style="display:flex;align-items:center;gap:6px">
     <input type="password" id="hf-token" placeholder="HF token (gated models)"
-      style="height:28px;padding:0 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg);color:var(--text);font-family:var(--font);font-size:12px;width:200px"
+      style="height:28px;padding:0 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg);color:var(--text);font-family:var(--font);font-size:12px;width:180px"
       oninput="onTokenInput(this.value)">
+    <a href="https://huggingface.co/LiquidAI/LFM2.5-VL-1.6B-ONNX" target="_blank" rel="noopener"
+      style="font-size:11px;color:var(--text-muted);text-decoration:none;white-space:nowrap"
+      title="Accept license, then get a token at huggingface.co/settings/tokens">Accept&nbsp;license&nbsp;↗</a>
   </div>
   <a class="header-link" href="https://github.com/transformers-js/transformers-js" target="_blank" rel="noopener">
     <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
