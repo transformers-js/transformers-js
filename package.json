@@ -18,7 +18,9 @@
     "dev": "vitest --reporter=verbose",
     "sync": "tsx codegen/sync.ts",
     "sync:init": "tsx codegen/sync.ts --init",
-    "benchmark": "tsx benchmark/compare.ts"
+    "benchmark": "tsx benchmark/compare.ts",
+    "benchmark:build": "node scripts/build-benchmark.js",
+    "benchmark:serve": "node scripts/build-benchmark.js && python3 -m http.server 3000 --directory benchmark"
   },
   "dependencies": {
     "@huggingface/tokenizers": "^0.1.3",
