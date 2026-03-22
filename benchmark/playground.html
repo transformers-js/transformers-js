@@ -553,7 +553,7 @@ window.loadModel = async function(id) {
             });
         } else if (id === 'vl') {
             pipes.vl = await pipeline('image-text-to-text', {
-                model: 'LiquidAI/LFM2.5-VL-1.6B-Instruct-ONNX',
+                model: 'LiquidAI/LFM2.5-VL-1.6B-ONNX',
                 device,
                 precision: 'q4',
             });
