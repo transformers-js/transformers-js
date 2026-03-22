@@ -15,7 +15,7 @@ export interface TensorOutput {
 // out of the browser bundle and onnxruntime-web out of the Node bundle.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _ort: any = null;
-const WASM_CDN = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
+const WASM_CDN = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/";
 
 async function getORT() {
     if (_ort) return _ort;
