@@ -1,4 +1,5 @@
 export { initRuntime } from "./runtime/index.js";
+export { setHFToken } from "./runtime/hub.js";
 export type { Device, RuntimeInfo, ModelOptions } from "./runtime/index.js";
 
 export { pipeline } from "./pipeline/index.js";
