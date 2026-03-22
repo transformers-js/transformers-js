@@ -1,5 +1,5 @@
 {
-  "name": "transformers-js",
+  "name": "@transformers-js/transformers-js",
   "version": "0.1.0",
   "type": "module",
   "description": "WebGPU-primary transformer inference runtime for the browser",
