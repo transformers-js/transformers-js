@@ -19,6 +19,12 @@ const WATCHED_PATTERNS = [
     /^src\/transformers\/models\/[^/]+\/feature_extraction_[^/]+\.py$/,
 ];
 
+// Registry / routing files — not processor implementations, skip them.
+const EXCLUDED_FILES = new Set([
+    "src/transformers/models/auto/image_processing_auto.py",
+    "src/transformers/models/auto/feature_extraction_auto.py",
+]);
+
 // ── GitHub API ─────────────────────────────────────────────────────────────
 
 async function ghFetch(path: string): Promise<Response> {
@@ -110,7 +116,7 @@ async function main() {
     for (const sha of newCommits) {
         const files = await getChangedFiles(sha);
         for (const file of files) {
-            if (WATCHED_PATTERNS.some((p) => p.test(file))) {
+            if (WATCHED_PATTERNS.some((p) => p.test(file)) && !EXCLUDED_FILES.has(file)) {
                 changedFiles.add(file);
             }
         }
