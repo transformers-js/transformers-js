@@ -16,7 +16,7 @@ import type { ImageData } from "../src/preprocessing/ops.js";
 
 setResizeImpl(cpuResize);
 
-const MODEL = "google/vit-base-patch16-224";
+const MODEL = "Xenova/vit-base-patch16-224";
 // 256×256 so R=y, G=x, B=(y+x)//2 are all exact integers [0,255] — no modulo wrapping,
 // no rounding, no discontinuities. Bicubic on smooth data causes no ringing.
 const W = 256, H = 256;

@@ -27,7 +27,7 @@ b = ((y_idx.astype(np.uint16) + x_idx.astype(np.uint16)) // 2).astype(np.uint8)
 rgb = np.stack([r, g, b], axis=-1)
 img = Image.fromarray(rgb, mode="RGB")
 
-MODEL = "google/vit-base-patch16-224"
+MODEL = "Xenova/vit-base-patch16-224"
 
 # Try Python transformers first; fall back to manual PIL if unavailable.
 pixel_values = None
@@ -43,10 +43,10 @@ except Exception as e:
     print(f"transformers unavailable ({e}), falling back to manual PIL preprocessing")
 
 if pixel_values is None:
-    # Manual ViT-base-patch16-224 config (resample=3=BICUBIC, a=-0.5 in PIL):
+    # Manual Xenova/vit-base-patch16-224 config (resample=2=BILINEAR):
     #   size: {height:224, width:224}, rescale: 1/255
     #   image_mean: [0.5, 0.5, 0.5], image_std: [0.5, 0.5, 0.5]
-    arr = np.array(img.resize((224, 224), Image.Resampling.BICUBIC), dtype=np.float32)
+    arr = np.array(img.resize((224, 224), Image.Resampling.BILINEAR), dtype=np.float32)
     arr = arr / 255.0
     arr = (arr - np.array([0.5, 0.5, 0.5])) / np.array([0.5, 0.5, 0.5])
     pixel_values = arr.transpose(2, 0, 1).astype(np.float32)  # CHW
