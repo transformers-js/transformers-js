@@ -40,20 +40,20 @@ jobs:
             git add src/preprocessing/ codegen/.last-sync
             git commit -m "sync: update preprocessing from huggingface/transformers"
             git push origin "$BRANCH"
+            printf '%s\n' \
+              'Automated sync of image/audio preprocessing from [huggingface/transformers](https://github.com/huggingface/transformers).' \
+              '' \
+              '## Review checklist' \
+              '- [ ] Numerical operations match the Python source exactly' \
+              '- [ ] No hand-written logic was overwritten' \
+              '- [ ] `@generated` header present in all changed files' \
+              '- [ ] TypeScript compiles cleanly (`npm run typecheck`)' \
+              '' \
+              '> Files in `src/preprocessing/` marked `@generated` are owned by this workflow. Do not edit them manually.' \
+              > /tmp/pr_body.md
             gh pr create \
               --title "sync: preprocessing update from huggingface/transformers" \
-              --body "$(cat <<'EOF'
-Automated sync of image/audio preprocessing from [huggingface/transformers](https://github.com/huggingface/transformers).
-
-## Review checklist
-- [ ] Numerical operations match the Python source exactly
-- [ ] No hand-written logic was overwritten
-- [ ] `@generated` header present in all changed files
-- [ ] TypeScript compiles cleanly (`npm run typecheck`)
-
-> Files in `src/preprocessing/` marked `@generated` are owned by this workflow. Do not edit them manually.
-EOF
-)" \
+              --body-file /tmp/pr_body.md \
               --label "automated,preprocessing"
           else
             echo "No changes — already up to date."
