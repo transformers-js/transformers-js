@@ -1,7 +1,7 @@
 import type { Device } from "./index.js";
 
 export interface TensorInput {
-    data: Float32Array;
+    data: Float32Array | BigInt64Array;
     dims: readonly number[];
 }
 
@@ -42,7 +42,8 @@ export class ONNXSession {
         const ort = await getORT();
         const feeds: Record<string, unknown> = {};
         for (const [name, { data, dims }] of Object.entries(inputs)) {
-            feeds[name] = new ort.Tensor("float32", data, dims);
+            const dtype = data instanceof BigInt64Array ? "int64" : "float32";
+            feeds[name] = new ort.Tensor(dtype, data, dims);
         }
 
         const results = await this.session.run(feeds) as Record<string, { data: Float32Array }>;
