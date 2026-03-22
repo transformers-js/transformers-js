@@ -4,6 +4,12 @@ export type { Device, RuntimeInfo, ModelOptions } from "./runtime/index.js";
 export { pipeline } from "./pipeline/index.js";
 export type { PipelineOptions } from "./pipeline/index.js";
 
+export { TextGenerationPipeline } from "./pipeline/text-generation.js";
+export type { Message, GenerateOptions } from "./pipeline/text-generation.js";
+
+export { LFM2ForCausalLM } from "./models/lfm2.js";
+export type { LFM2Options, LFM2Precision } from "./models/lfm2.js";
+
 export { ImageClassificationPipeline } from "./pipeline/image-classification.js";
 export type { ClassificationResult, ImageClassificationOptions } from "./pipeline/image-classification.js";
 

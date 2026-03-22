@@ -6,7 +6,8 @@ export interface TensorInput {
 }
 
 export interface TensorOutput {
-    data: Float32Array;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    data: any;
     dims: readonly number[];
 }
 
@@ -33,17 +34,30 @@ async function getORT(device: Device) {
     return _ort;
 }
 
+export interface ExternalDataFile {
+    /** Filename as referenced inside the .onnx proto (e.g. "model_q8.onnx_data"). */
+    path: string;
+    data: ArrayBuffer;
+}
+
 export class ONNXSession {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private constructor(private readonly session: any, private readonly ort: any) {}
 
-    static async load(modelBuffer: ArrayBuffer, device: Device): Promise<ONNXSession> {
+    static async load(
+        modelBuffer: ArrayBuffer,
+        device: Device,
+        externalData?: ExternalDataFile[],
+    ): Promise<ONNXSession> {
         const ort = await getORT(device);
         // WebGPU path: WASM EP excluded — binary never loaded on the WebGPU path.
         // CPU path: WASM EP only.
         const eps = device === "webgpu" ? ["webgpu"] : ["wasm"];
         const session = await ort.InferenceSession.create(modelBuffer, {
             executionProviders: eps,
+            // ONNX Runtime Web accepts external data as { path, data } objects.
+            // Ignored when undefined — zero cost on models without external data.
+            ...(externalData ? { externalData } : {}),
         });
         return new ONNXSession(session, ort);
     }
