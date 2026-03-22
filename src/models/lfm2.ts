@@ -46,6 +46,7 @@ export class LFM2ForCausalLM {
         private readonly modelCfg: LFM2ModelConfig,
         private readonly eosTokenId: number,
         private readonly hasPositionIds: boolean,
+        private readonly inputNames: string[],
     ) {}
 
     static async fromHub(modelId: string, options: LFM2Options = {}): Promise<LFM2ForCausalLM> {
@@ -64,12 +65,11 @@ export class LFM2ForCausalLM {
         const externalData = [{ path: dataFile.split("/").pop()!, data: dataBuffer }];
         const session = await ONNXSession.load(modelBuffer, device, externalData);
 
-        // Check if the model takes position_ids by inspecting input names.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const inputNames: string[] = (session as any).session.inputNames ?? [];
         const hasPositionIds = inputNames.includes("position_ids");
 
-        return new LFM2ForCausalLM(session, tokenizer, config, config.eos_token_id, hasPositionIds);
+        return new LFM2ForCausalLM(session, tokenizer, config, config.eos_token_id, hasPositionIds, inputNames);
     }
 
     async chat(messages: Message[], options: GenerateOptions = {}): Promise<string> {
@@ -85,6 +85,7 @@ export class LFM2ForCausalLM {
             this.modelCfg,
             genCfg,
             this.hasPositionIds,
+            this.inputNames,
         );
         return this.tokenizer.decode(generatedIds);
     }

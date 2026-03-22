@@ -51,6 +51,7 @@ export class LFM2VLForConditionalGeneration {
         private readonly maxTiles: number,
         private readonly hasPositionIds: boolean,
         private readonly hiddenSize: number,
+        private readonly decoderInputNames: string[],
     ) {}
 
     static async fromHub(modelId: string, options: LFM2VLOptions = {}): Promise<LFM2VLForConditionalGeneration> {
@@ -103,6 +104,7 @@ export class LFM2VLForConditionalGeneration {
             config.max_tiles,
             hasPositionIds,
             textCfg.hidden_size,
+            decInputNames,
         );
     }
 
@@ -152,7 +154,7 @@ export class LFM2VLForConditionalGeneration {
         const prefillSeqLen = prefillEmbeds.length / this.hiddenSize;
 
         // ── 5. Prefill decoder ─────────────────────────────────────────────
-        const cache = initCache(this.modelCfg);
+        const cache = initCache(this.decoderInputNames, this.modelCfg);
         const attnMask = new BigInt64Array(prefillSeqLen).fill(1n);
 
         const prefillInputs: Record<string, import("../runtime/session.js").TensorInput> = {

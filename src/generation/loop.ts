@@ -8,40 +8,34 @@ export interface GenerationConfig {
 }
 
 export interface LFM2ModelConfig {
-    num_hidden_layers: number;
     num_key_value_heads: number;
     hidden_size: number;
     conv_L_cache: number;
-    layer_types: string[];
     /** head_dim = hidden_size / num_attention_heads */
     num_attention_heads: number;
 }
 
 /**
- * Build the initial (empty) KV+conv cache for a single batch.
- * Attention layers: past_key_values.N.key/value — shape [1, num_kv_heads, 0, head_dim]
- * Conv layers:      past_conv_N                 — shape [1, hidden_size, conv_L_cache]
+ * Build the initial (empty) KV+conv cache directly from the session's input
+ * names. This is the only reliable source — inferring from config fields like
+ * layer_types leads to fragile index arithmetic when naming conventions differ.
+ *
+ * Recognised patterns:
+ *   past_key_values.N.key / past_key_values.N.value → [1, num_kv_heads, 0, head_dim]
+ *   past_conv.N                                      → [1, hidden_size, conv_L_cache]
  */
-export function initCache(cfg: LFM2ModelConfig): Record<string, TensorInput> {
+export function initCache(inputNames: string[], cfg: LFM2ModelConfig): Record<string, TensorInput> {
     const cache: Record<string, TensorInput> = {};
     const headDim = cfg.hidden_size / cfg.num_attention_heads;
-    let attnIdx = 0;
-    let convIdx = 0;
 
-    for (let i = 0; i < cfg.layer_types.length; i++) {
-        const layerType = cfg.layer_types[i]!;
-        if (layerType === "full_attention") {
-            // Attention KV cache is keyed by global layer index.
-            cache[`past_key_values.${i}.key`]   = { data: new Float32Array(0), dims: [1, cfg.num_key_value_heads, 0, headDim] };
-            cache[`past_key_values.${i}.value`] = { data: new Float32Array(0), dims: [1, cfg.num_key_value_heads, 0, headDim] };
-            attnIdx++;
-        } else {
-            // Conv state is keyed by local conv index (its own sequential namespace).
-            cache[`past_conv.${convIdx}`] = {
+    for (const name of inputNames) {
+        if (name.endsWith(".key") || name.endsWith(".value")) {
+            cache[name] = { data: new Float32Array(0), dims: [1, cfg.num_key_value_heads, 0, headDim] };
+        } else if (name.startsWith("past_conv.")) {
+            cache[name] = {
                 data: new Float32Array(cfg.hidden_size * cfg.conv_L_cache),
                 dims: [1, cfg.hidden_size, cfg.conv_L_cache],
             };
-            convIdx++;
         }
     }
 
@@ -49,8 +43,9 @@ export function initCache(cfg: LFM2ModelConfig): Record<string, TensorInput> {
 }
 
 /**
- * Update cache from session outputs.
- * Renames: present_conv_N → past_conv_N, present.N.key/value → past_key_values.N.key/value
+ * Copy present-state outputs back into the cache under their past-state names.
+ * present.N.key/value  → past_key_values.N.key/value
+ * present_conv.N       → past_conv.N
  */
 export function updateCache(
     cache: Record<string, TensorInput>,
@@ -67,9 +62,6 @@ export function updateCache(
 
 /**
  * Autoregressive generation loop for LFM2-style ONNX models.
- *
- * The session must have already been loaded. Caller provides the prompt
- * token ids. Returns the generated token ids (not including the prompt).
  */
 export async function generate(
     session: ONNXSession,
@@ -77,10 +69,11 @@ export async function generate(
     modelCfg: LFM2ModelConfig,
     genCfg: GenerationConfig,
     hasPositionIds: boolean,
+    inputNames: string[],
 ): Promise<number[]> {
     const { eosTokenId, maxNewTokens = 512, sampling } = genCfg;
     const generated: number[] = [];
-    const cache = initCache(modelCfg);
+    const cache = initCache(inputNames, modelCfg);
 
     // ── Prefill ────────────────────────────────────────────────────────────
     const seqLen = promptIds.length;
