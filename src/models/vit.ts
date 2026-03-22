@@ -43,7 +43,7 @@ export class ViTForImageClassification {
             pixel_values: { data: pixelValues, dims },
         });
 
-        return outputs["logits"]!;
+        return outputs["logits"]!.data;
     }
 
     label(classIndex: number): string {

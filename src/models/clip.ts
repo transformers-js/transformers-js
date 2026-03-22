@@ -39,7 +39,7 @@ export class CLIPModel {
             pixel_values: { data: pixelValues, dims },
         });
 
-        return l2Normalize(out["pooler_output"] ?? out["last_hidden_state"]!);
+        return l2Normalize((out["pooler_output"] ?? out["last_hidden_state"]!).data);
     }
 
     /** Returns a normalized L2 embedding of shape [hidden_size]. */
@@ -53,7 +53,7 @@ export class CLIPModel {
             attention_mask: { data: attention_mask, dims },
         });
 
-        return l2Normalize(out["pooler_output"] ?? out["last_hidden_state"]!);
+        return l2Normalize((out["pooler_output"] ?? out["last_hidden_state"]!).data);
     }
 
     dispose(): void {
@@ -62,13 +62,12 @@ export class CLIPModel {
     }
 }
 
-/** L2-normalize a vector in-place, return it. */
+/** L2-normalize a vector, returning a new array. Does not mutate input. */
 export function l2Normalize(vec: Float32Array): Float32Array {
     let norm = 0;
     for (const v of vec) norm += v * v;
     norm = Math.sqrt(norm);
-    if (norm === 0) return vec;
-    for (let i = 0; i < vec.length; i++) vec[i]! / norm; // read-only: create new
+    if (norm === 0) return new Float32Array(vec);
     const out = new Float32Array(vec.length);
     for (let i = 0; i < vec.length; i++) out[i] = vec[i]! / norm;
     return out;

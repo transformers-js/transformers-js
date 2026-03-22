@@ -5,6 +5,11 @@ export interface TensorInput {
     dims: readonly number[];
 }
 
+export interface TensorOutput {
+    data: Float32Array;
+    dims: readonly number[];
+}
+
 // ORT is loaded once and reused. Dynamic import keeps onnxruntime-node
 // out of the browser bundle and onnxruntime-web out of the Node bundle.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,7 +43,7 @@ export class ONNXSession {
         return new ONNXSession(session);
     }
 
-    async run(inputs: Record<string, TensorInput>): Promise<Record<string, Float32Array>> {
+    async run(inputs: Record<string, TensorInput>): Promise<Record<string, TensorOutput>> {
         const ort = await getORT();
         const feeds: Record<string, unknown> = {};
         for (const [name, { data, dims }] of Object.entries(inputs)) {
@@ -46,10 +51,10 @@ export class ONNXSession {
             feeds[name] = new ort.Tensor(dtype, data, dims);
         }
 
-        const results = await this.session.run(feeds) as Record<string, { data: Float32Array }>;
-        const out: Record<string, Float32Array> = {};
+        const results = await this.session.run(feeds) as Record<string, { data: Float32Array; dims: readonly number[] }>;
+        const out: Record<string, TensorOutput> = {};
         for (const [name, tensor] of Object.entries(results)) {
-            out[name] = tensor.data;
+            out[name] = { data: tensor.data, dims: tensor.dims };
         }
         return out;
     }
