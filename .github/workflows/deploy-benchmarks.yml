@@ -21,7 +21,7 @@ jobs:
 
       - run: npm ci
 
-      - name: Build benchmark bundle
+      - name: Build bundles
         run: node scripts/build-benchmark.js
 
       - name: Push to transformers-js.github.io
@@ -34,6 +34,12 @@ jobs:
           export GIT_SSH_COMMAND="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no"
           git clone --branch gh-pages git@github.com:transformers-js/transformers-js.github.io.git _site
 
+          # Playground → site root
+          mkdir -p _site/dist
+          cp benchmark/playground.html _site/index.html
+          cp benchmark/dist/playground.js _site/dist/playground.js
+
+          # Latency benchmark → /benchmarks/
           mkdir -p _site/benchmarks/dist
           cp benchmark/latency.html _site/benchmarks/latency.html
           cp benchmark/dist/latency.js _site/benchmarks/dist/latency.js
@@ -41,7 +47,7 @@ jobs:
           cd _site
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add benchmarks/
+          git add .
           git diff --cached --quiet && echo "No changes" && exit 0
-          git commit -m "Deploy benchmarks from transformers-js@${GITHUB_SHA::7}"
+          git commit -m "Deploy from transformers-js@${GITHUB_SHA::7}"
           git push

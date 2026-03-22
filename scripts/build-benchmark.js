@@ -7,18 +7,25 @@ import { mkdir } from "fs/promises";
 
 await mkdir("benchmark/dist", { recursive: true });
 
-await esbuild.build({
-    entryPoints: ["benchmark/latency-entry.ts"],
+const sharedConfig = {
     bundle: true,
     platform: "browser",
     format: "esm",
-    // ORT packages stay external — importmap in the HTML resolves them.
-    // onnxruntime-node is dead code in browser (isNode branch never taken)
-    // but esbuild still sees the import; mark external to avoid bundling.
     external: ["onnxruntime-web", "onnxruntime-node"],
-    outfile: "benchmark/dist/latency.js",
     minify: false,
     sourcemap: true,
-});
+};
 
+await esbuild.build({
+    ...sharedConfig,
+    entryPoints: ["benchmark/latency-entry.ts"],
+    outfile: "benchmark/dist/latency.js",
+});
 console.log("Built benchmark/dist/latency.js");
+
+await esbuild.build({
+    ...sharedConfig,
+    entryPoints: ["benchmark/playground-entry.ts"],
+    outfile: "benchmark/dist/playground.js",
+});
+console.log("Built benchmark/dist/playground.js");
