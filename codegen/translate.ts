@@ -1,8 +1,13 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const client = new Anthropic();
+// Uses GitHub Models API (models.github.ai) so only GITHUB_TOKEN is needed —
+// no separate ANTHROPIC_API_KEY. GITHUB_TOKEN is auto-provisioned in Actions.
+const client = new OpenAI({
+    baseURL: "https://models.github.ai/inference",
+    apiKey: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? "",
+});
 
 const SYSTEM_PROMPT = readFileSync(
     join(import.meta.dirname, "prompts/image-processor.md"),
@@ -10,12 +15,11 @@ const SYSTEM_PROMPT = readFileSync(
 );
 
 export async function translate(pythonSource: string, sourcePath: string): Promise<string> {
-    const stream = client.messages.stream({
+    const response = await client.chat.completions.create({
         model: "claude-opus-4-6",
         max_tokens: 8192,
-        thinking: { type: "adaptive" },
-        system: SYSTEM_PROMPT,
         messages: [
+            { role: "system", content: SYSTEM_PROMPT },
             {
                 role: "user",
                 content: `Translate this file to TypeScript.\n\nSource path: ${sourcePath}\n\n\`\`\`python\n${pythonSource}\n\`\`\``,
@@ -23,15 +27,8 @@ export async function translate(pythonSource: string, sourcePath: string): Promi
         ],
     });
 
-    const message = await stream.finalMessage();
-
-    for (const block of message.content) {
-        if (block.type === "text") {
-            const match = block.text.match(/```typescript\n([\s\S]+?)\n```/);
-            if (match?.[1]) return match[1];
-            return block.text;
-        }
-    }
-
-    throw new Error("No text content in translation response");
+    const text = response.choices[0]?.message?.content ?? "";
+    const match = text.match(/```typescript\n([\s\S]+?)\n```/);
+    if (match?.[1]) return match[1];
+    return text;
 }
