@@ -554,10 +554,11 @@ window.loadModel = async function(id) {
     } catch (err) {
         btn.disabled = false;
         btn.textContent = 'Retry';
-        console.error(err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('Failed to load model:', err);
         const demo = document.getElementById(`demo-${id}`);
         demo.style.display = 'block';
-        demo.innerHTML = `<p class="status-msg error">Failed to load: ${err.message}</p>`;
+        demo.innerHTML = `<p class="status-msg error">Failed to load: ${msg}</p>`;
     }
 };
 
