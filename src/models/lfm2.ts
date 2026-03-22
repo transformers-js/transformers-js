@@ -11,6 +11,12 @@ export interface LFM2Options {
     device?: Device;
     /** Quantization variant. Default: "q8" (~1.7GB, recommended balance). */
     precision?: LFM2Precision;
+    /**
+     * Base URL for a self-hosted mirror (e.g. a GitHub Release).
+     * Files are fetched as `${mirrorBaseUrl}/${basename}` with no HF token.
+     * Useful for serving gated models without requiring users to authenticate.
+     */
+    mirrorBaseUrl?: string;
 }
 
 export interface GenerateOptions {
@@ -52,16 +58,16 @@ export class LFM2ForCausalLM {
     ) {}
 
     static async fromHub(modelId: string, options: LFM2Options = {}): Promise<LFM2ForCausalLM> {
-        const { device = "webgpu", precision = "q8" } = options;
+        const { device = "webgpu", precision = "q8", mirrorBaseUrl } = options;
 
         const onnxFile = ONNX_FILE[precision];
         const dataFile = DATA_FILE[precision];
 
         const [modelBuffer, dataBuffer, config, tokenizer] = await Promise.all([
-            fetchRaw(modelId, onnxFile),
-            fetchRaw(modelId, dataFile),
-            fetchJSON<FullConfig>(modelId, "config.json"),
-            LFM2Tokenizer.fromHub(modelId),
+            fetchRaw(modelId, onnxFile, mirrorBaseUrl),
+            fetchRaw(modelId, dataFile, mirrorBaseUrl),
+            fetchJSON<FullConfig>(modelId, "config.json", mirrorBaseUrl),
+            LFM2Tokenizer.fromHub(modelId, mirrorBaseUrl),
         ]);
 
         const externalData = [{ path: dataFile.split("/").pop()!, data: dataBuffer }];

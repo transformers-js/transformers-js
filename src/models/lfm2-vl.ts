@@ -19,6 +19,8 @@ export interface LFM2VLOptions {
      * Default: "q4"
      */
     precision?: LFM2VLPrecision;
+    /** Base URL for a self-hosted mirror. See LFM2Options.mirrorBaseUrl. */
+    mirrorBaseUrl?: string;
 }
 
 export interface VLGenerateOptions {
@@ -55,7 +57,7 @@ export class LFM2VLForConditionalGeneration {
     ) {}
 
     static async fromHub(modelId: string, options: LFM2VLOptions = {}): Promise<LFM2VLForConditionalGeneration> {
-        const { device = "webgpu", precision = "q4" } = options;
+        const { device = "webgpu", precision = "q4", mirrorBaseUrl } = options;
         const [decoderFile, decoderData] = DECODER_FILE[precision];
 
         const [
@@ -65,14 +67,14 @@ export class LFM2VLForConditionalGeneration {
             config,
             tokenizer,
         ] = await Promise.all([
-            fetchRaw(modelId, "onnx/embed_images_fp16.onnx"),
-            fetchRaw(modelId, "onnx/embed_images_fp16.onnx_data"),
-            fetchRaw(modelId, "onnx/embed_tokens_fp16.onnx"),
-            fetchRaw(modelId, "onnx/embed_tokens_fp16.onnx_data"),
-            fetchRaw(modelId, decoderFile),
-            fetchRaw(modelId, decoderData),
-            fetchJSON<VLConfig>(modelId, "config.json"),
-            LFM2Tokenizer.fromHub(modelId),
+            fetchRaw(modelId, "onnx/embed_images_fp16.onnx", mirrorBaseUrl),
+            fetchRaw(modelId, "onnx/embed_images_fp16.onnx_data", mirrorBaseUrl),
+            fetchRaw(modelId, "onnx/embed_tokens_fp16.onnx", mirrorBaseUrl),
+            fetchRaw(modelId, "onnx/embed_tokens_fp16.onnx_data", mirrorBaseUrl),
+            fetchRaw(modelId, decoderFile, mirrorBaseUrl),
+            fetchRaw(modelId, decoderData, mirrorBaseUrl),
+            fetchJSON<VLConfig>(modelId, "config.json", mirrorBaseUrl),
+            LFM2Tokenizer.fromHub(modelId, mirrorBaseUrl),
         ]);
 
         const [embedImagesSession, embedTokensSession, decoderSession] = await Promise.all([

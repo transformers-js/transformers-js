@@ -17,10 +17,10 @@ export interface Message {
 export class LFM2Tokenizer {
     private constructor(private readonly tokenizer: Tokenizer) {}
 
-    static async fromHub(modelId: string): Promise<LFM2Tokenizer> {
+    static async fromHub(modelId: string, mirrorBaseUrl?: string): Promise<LFM2Tokenizer> {
         const [tokenizerJson, tokenizerConfig] = await Promise.all([
-            fetchJSON<object>(modelId, "tokenizer.json"),
-            fetchJSON<object>(modelId, "tokenizer_config.json"),
+            fetchJSON<object>(modelId, "tokenizer.json", mirrorBaseUrl),
+            fetchJSON<object>(modelId, "tokenizer_config.json", mirrorBaseUrl),
         ]);
         return new LFM2Tokenizer(new Tokenizer(tokenizerJson, tokenizerConfig));
     }
