@@ -28,7 +28,8 @@
 <script type="module">
 import { initRuntime, ViTForImageClassification } from "./dist/latency.js";
 
-const MODEL   = "Xenova/vit-base-patch16-224";
+const MODEL      = "Xenova/vit-base-patch16-224";
+const QUANTIZED  = true;   // onnx/model_quantized.onnx (~85MB vs ~350MB)
 const RUNS    = 20;   // warm iterations
 const WARMUP  = 3;    // iterations discarded
 
@@ -62,7 +63,7 @@ async function run() {
 
     log("\nLoading ViT-B/16 (includes model download on first run)...", "dim");
     const t0 = performance.now();
-    const model = await ViTForImageClassification.fromHub(MODEL, device);
+    const model = await ViTForImageClassification.fromHub(MODEL, { device, quantized: QUANTIZED });
     const loadMs = performance.now() - t0;
     log(`  loaded in ${loadMs.toFixed(0)} ms`, "dim");
 
@@ -93,7 +94,7 @@ async function run() {
     const pass = median <= CRITERION;
 
     log("\n─────────────────────────────────────────");
-    log(`Model:   ${MODEL}`);
+    log(`Model:   ${MODEL} (${QUANTIZED ? "quantized" : "float32"})`);
     log(`Device:  ${device}`);
     log(`Runs:    ${RUNS} (after ${WARMUP} warmup)`);
     log("");

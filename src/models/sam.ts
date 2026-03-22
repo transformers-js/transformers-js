@@ -2,7 +2,7 @@ import { fetchRaw } from "../runtime/hub.js";
 import { ONNXSession } from "../runtime/session.js";
 import { SAMImageProcessor, scalePoint, scaleBox, postProcessMask } from "../preprocessing/sam.js";
 import type { SAMPreprocessed } from "../preprocessing/sam.js";
-import type { Device } from "../runtime/index.js";
+import type { Device, ModelOptions } from "../runtime/index.js";
 import type { ImageData } from "../preprocessing/ops.js";
 
 // ── Public types ─────────────────────────────────────────────────────────────────
@@ -54,10 +54,12 @@ export class SAMModel {
         private readonly processor: SAMImageProcessor,
     ) {}
 
-    static async fromHub(modelId: string, device: Device = "webgpu"): Promise<SAMModel> {
+    static async fromHub(modelId: string, options: ModelOptions = {}): Promise<SAMModel> {
+        const { device = "webgpu", quantized = false } = options;
+        const suffix = quantized ? "_quantized" : "";
         const [encoderBuf, decoderBuf, processor] = await Promise.all([
-            fetchRaw(modelId, "onnx/encoder_model.onnx"),
-            fetchRaw(modelId, "onnx/decoder_model.onnx"),
+            fetchRaw(modelId, `onnx/encoder_model${suffix}.onnx`),
+            fetchRaw(modelId, `onnx/decoder_model${suffix}.onnx`),
             SAMImageProcessor.fromHub(modelId),
         ]);
 

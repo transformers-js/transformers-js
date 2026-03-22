@@ -2,7 +2,7 @@ import { fetchRaw } from "../runtime/hub.js";
 import { ONNXSession } from "../runtime/session.js";
 import { ImageProcessor } from "../preprocessing/image-processor.js";
 import { CLIPTokenizer } from "../tokenization/clip-tokenizer.js";
-import type { Device } from "../runtime/index.js";
+import type { Device, ModelOptions } from "../runtime/index.js";
 import type { ImageData } from "../preprocessing/ops.js";
 
 export class CLIPModel {
@@ -13,10 +13,12 @@ export class CLIPModel {
         readonly tokenizer: CLIPTokenizer,
     ) {}
 
-    static async fromHub(modelId: string, device: Device = "webgpu"): Promise<CLIPModel> {
+    static async fromHub(modelId: string, options: ModelOptions = {}): Promise<CLIPModel> {
+        const { device = "webgpu", quantized = false } = options;
+        const suffix = quantized ? "_quantized" : "";
         const [visionBuffer, textBuffer, processor, tokenizer] = await Promise.all([
-            fetchRaw(modelId, "onnx/vision_model.onnx"),
-            fetchRaw(modelId, "onnx/text_model.onnx"),
+            fetchRaw(modelId, `onnx/vision_model${suffix}.onnx`),
+            fetchRaw(modelId, `onnx/text_model${suffix}.onnx`),
             ImageProcessor.fromHub(modelId),
             CLIPTokenizer.fromHub(modelId),
         ]);

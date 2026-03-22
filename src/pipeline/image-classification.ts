@@ -9,6 +9,7 @@ export interface ClassificationResult {
 
 export interface ImageClassificationOptions {
     device?: Device;
+    quantized?: boolean;
     topK?: number;
 }
 
@@ -19,7 +20,7 @@ export class ImageClassificationPipeline {
         modelId: string,
         options: ImageClassificationOptions = {},
     ): Promise<ImageClassificationPipeline> {
-        const model = await ViTForImageClassification.fromHub(modelId, options.device ?? "webgpu");
+        const model = await ViTForImageClassification.fromHub(modelId, options);
         return new ImageClassificationPipeline(model);
     }
 

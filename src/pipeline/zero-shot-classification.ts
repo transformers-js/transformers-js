@@ -10,6 +10,7 @@ export interface ZeroShotResult {
 
 export interface ZeroShotOptions {
     device?: Device;
+    quantized?: boolean;
     /** Template wrapping each label before encoding. Default: "a photo of a {label}" */
     template?: (label: string) => string;
 }
@@ -28,7 +29,7 @@ export class ZeroShotImageClassificationPipeline {
         modelId: string,
         options: ZeroShotOptions = {},
     ): Promise<ZeroShotImageClassificationPipeline> {
-        const model = await CLIPModel.fromHub(modelId, options.device ?? "webgpu");
+        const model = await CLIPModel.fromHub(modelId, options);
         return new ZeroShotImageClassificationPipeline(model, options);
     }
 

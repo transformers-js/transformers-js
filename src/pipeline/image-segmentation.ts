@@ -7,6 +7,7 @@ export type { SAMPrompt, SAMMask };
 
 export interface SegmentationOptions {
     device?: Device;
+    quantized?: boolean;
 }
 
 /**
@@ -24,7 +25,7 @@ export class ImageSegmentationPipeline {
         modelId: string,
         options: SegmentationOptions = {},
     ): Promise<ImageSegmentationPipeline> {
-        const model = await SAMModel.fromHub(modelId, options.device ?? "webgpu");
+        const model = await SAMModel.fromHub(modelId, options);
         return new ImageSegmentationPipeline(model);
     }
 

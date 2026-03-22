@@ -8,6 +8,13 @@ export interface RuntimeInfo {
     gpuAdapter?: GPUAdapter;
 }
 
+export interface ModelOptions {
+    device?: Device;
+    /** Load the INT8 quantized weights (e.g. onnx/model_quantized.onnx).
+     *  ~4× smaller download, similar accuracy for most vision tasks. Default: false. */
+    quantized?: boolean;
+}
+
 /** Initialize the runtime. Must be called before any preprocessing.
  *  Automatically selects WebGPU if available, falls back to CPU. */
 export async function initRuntime(preferred: Device = "webgpu"): Promise<RuntimeInfo> {

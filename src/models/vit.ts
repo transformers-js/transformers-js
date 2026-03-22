@@ -1,7 +1,7 @@
 import { fetchRaw, fetchJSON } from "../runtime/hub.js";
 import { ONNXSession } from "../runtime/session.js";
 import { ImageProcessor } from "../preprocessing/image-processor.js";
-import type { Device } from "../runtime/index.js";
+import type { Device, ModelOptions } from "../runtime/index.js";
 import type { ImageData } from "../preprocessing/ops.js";
 
 interface ModelConfig {
@@ -16,9 +16,11 @@ export class ViTForImageClassification {
         private readonly id2label: Record<number, string>,
     ) {}
 
-    static async fromHub(modelId: string, device: Device = "webgpu"): Promise<ViTForImageClassification> {
+    static async fromHub(modelId: string, options: ModelOptions = {}): Promise<ViTForImageClassification> {
+        const { device = "webgpu", quantized = false } = options;
+        const modelFile = quantized ? "onnx/model_quantized.onnx" : "onnx/model.onnx";
         const [modelBuffer, processor, config] = await Promise.all([
-            fetchRaw(modelId, "onnx/model.onnx"),
+            fetchRaw(modelId, modelFile),
             ImageProcessor.fromHub(modelId),
             fetchJSON<ModelConfig>(modelId, "config.json"),
         ]);
