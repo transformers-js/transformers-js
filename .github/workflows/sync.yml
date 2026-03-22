@@ -1,0 +1,60 @@
+name: Sync preprocessing from huggingface/transformers
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # daily at midnight UTC
+  workflow_dispatch: # manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Run sync
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run sync
+
+      - name: Open PR if changes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "$(git status --porcelain src/preprocessing/ codegen/.last-sync)" ]; then
+            BRANCH="sync/preprocessing-$(date +%Y%m%d-%H%M)"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git checkout -b "$BRANCH"
+            git add src/preprocessing/ codegen/.last-sync
+            git commit -m "sync: update preprocessing from huggingface/transformers"
+            git push origin "$BRANCH"
+            gh pr create \
+              --title "sync: preprocessing update from huggingface/transformers" \
+              --body "$(cat <<'EOF'
+Automated sync of image/audio preprocessing from [huggingface/transformers](https://github.com/huggingface/transformers).
+
+## Review checklist
+- [ ] Numerical operations match the Python source exactly
+- [ ] No hand-written logic was overwritten
+- [ ] `@generated` header present in all changed files
+- [ ] TypeScript compiles cleanly (`npm run typecheck`)
+
+> Files in `src/preprocessing/` marked `@generated` are owned by this workflow. Do not edit them manually.
+EOF
+)" \
+              --label "automated,preprocessing"
+          else
+            echo "No changes — already up to date."
+          fi
