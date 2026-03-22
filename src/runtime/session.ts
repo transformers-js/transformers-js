@@ -15,7 +15,7 @@ export interface TensorOutput {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _ort: any = null;
 
-async function getORT() {
+async function getORT(device: Device) {
     if (_ort) return _ort;
 
     const isNode = typeof process !== "undefined" && !!process.versions?.node;
@@ -23,8 +23,11 @@ async function getORT() {
         _ort = await import("onnxruntime-node");
     } else {
         _ort = await import("onnxruntime-web");
-        // Point WASM loader at the CDN so the browser doesn't need a local copy
-        _ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
+        if (device !== "webgpu") {
+            // Point WASM loader at the CDN — keeps the binary out of the bundle
+            // and off the WebGPU path entirely (loaded lazily only when needed).
+            _ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
+        }
     }
 
     return _ort;
@@ -32,19 +35,21 @@ async function getORT() {
 
 export class ONNXSession {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    private constructor(private readonly session: any) {}
+    private constructor(private readonly session: any, private readonly ort: any) {}
 
     static async load(modelBuffer: ArrayBuffer, device: Device): Promise<ONNXSession> {
-        const ort = await getORT();
-        const eps = device === "webgpu" ? ["webgpu", "wasm"] : ["wasm"];
+        const ort = await getORT(device);
+        // WebGPU path: WASM EP excluded — binary never loaded on the WebGPU path.
+        // CPU path: WASM EP only.
+        const eps = device === "webgpu" ? ["webgpu"] : ["wasm"];
         const session = await ort.InferenceSession.create(modelBuffer, {
             executionProviders: eps,
         });
-        return new ONNXSession(session);
+        return new ONNXSession(session, ort);
     }
 
     async run(inputs: Record<string, TensorInput>): Promise<Record<string, TensorOutput>> {
-        const ort = await getORT();
+        const ort = this.ort;
         const feeds: Record<string, unknown> = {};
         for (const [name, { data, dims }] of Object.entries(inputs)) {
             const dtype = data instanceof BigInt64Array ? "int64" : "float32";
