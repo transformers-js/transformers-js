@@ -1,6 +1,9 @@
 export { initRuntime } from "./runtime/index.js";
 export type { Device, RuntimeInfo, ModelOptions } from "./runtime/index.js";
 
+export { pipeline } from "./pipeline/index.js";
+export type { PipelineOptions } from "./pipeline/index.js";
+
 export { ImageClassificationPipeline } from "./pipeline/image-classification.js";
 export type { ClassificationResult, ImageClassificationOptions } from "./pipeline/image-classification.js";
 
