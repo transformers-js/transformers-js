@@ -54,6 +54,17 @@ export class ONNXSession {
         externalData?: ExternalDataFile[],
     ): Promise<ONNXSession> {
         const ort = await getORT();
+
+        // Protobuf first-byte sanity check. HTML (gated model redirect) and
+        // other text responses start with '<' (0x3c) — catch before ORT does.
+        const firstByte = new Uint8Array(modelBuffer, 0, 1)[0];
+        if (firstByte === 0x3c /* '<' */) {
+            throw new Error(
+                "Model buffer starts with '<' — received HTML instead of ONNX binary. " +
+                "The model may be gated; accept its license on huggingface.co.",
+            );
+        }
+
         const opts = externalData ? { externalData } : {};
 
         // Try preferred EP first; if WebGPU session creation fails, fall back to
