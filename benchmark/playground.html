@@ -471,6 +471,36 @@ main {
       </div>
     </div>
 
+    <!-- ── Vision Chat ── -->
+    <div class="card" id="card-vl">
+      <div class="card-header">
+        <div class="card-meta">
+          <div class="card-row">
+            <span class="card-name">Vision Chat</span>
+            <span class="tag">LFM2.5-VL 1.6B</span>
+          </div>
+          <div class="card-desc">Ask questions about images using a multimodal Liquid Foundation Model.</div>
+        </div>
+        <span class="card-size">1.5 GB</span>
+        <button class="btn" id="btn-vl" onclick="loadModel('vl')">Load</button>
+      </div>
+      <div class="card-demo" id="demo-vl">
+        <div class="drop-zone" id="drop-vl" style="margin-bottom:12px">
+          Drop an image here or click to browse
+          <input type="file" accept="image/*" onchange="onVLImageFile(this)">
+        </div>
+        <div id="vl-image-row" style="display:none;margin-bottom:12px">
+          <img id="preview-vl" class="preview-img" style="display:block;width:80px;height:80px">
+        </div>
+        <div class="chat-messages" id="vl-chat-messages"></div>
+        <div class="chat-input-row">
+          <textarea class="chat-input" id="vl-chat-input" placeholder="Ask something about the image…"
+            rows="1" onkeydown="onVLChatKey(event)"></textarea>
+          <button class="btn btn-primary" id="vl-chat-send" onclick="sendVLChat()">Send</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </main>
 
@@ -483,6 +513,8 @@ const { device } = await initRuntime();
 // ── State ─────────────────────────────────────────────────────────────────
 const pipes = {};            // loaded pipeline instances
 const chatHistory = [];      // [{ role, content }]
+const vlChatHistory = [];    // [{ role, content }]
+let vlImage = null;          // ImageData for VL model
 
 // ── Load model ───────────────────────────────────────────────────────────
 window.loadModel = async function(id) {
@@ -506,6 +538,12 @@ window.loadModel = async function(id) {
         } else if (id === 'tg') {
             pipes.tg = await pipeline('text-generation', {
                 model: 'LiquidAI/LFM2.5-1.2B-Instruct-ONNX',
+                device,
+                precision: 'q4',
+            });
+        } else if (id === 'vl') {
+            pipes.vl = await pipeline('image-text-to-text', {
+                model: 'LiquidAI/LFM2.5-VL-1.6B-Instruct-ONNX',
                 device,
                 precision: 'q4',
             });
@@ -655,6 +693,69 @@ function escHtml(s) {
     return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// ── Vision Chat ───────────────────────────────────────────────────────────
+window.onVLImageFile = async function(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const url = URL.createObjectURL(file);
+    const preview = document.getElementById('preview-vl');
+    preview.src = url;
+
+    const imageRow = document.getElementById('vl-image-row');
+    imageRow.style.display = 'block';
+
+    vlImage = await decodeImage(url);
+
+    // Reset conversation when image changes
+    vlChatHistory.length = 0;
+    renderVLChat();
+};
+
+window.onVLChatKey = function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendVLChat();
+    }
+};
+
+window.sendVLChat = async function() {
+    const input = document.getElementById('vl-chat-input');
+    const sendBtn = document.getElementById('vl-chat-send');
+    const text = input.value.trim();
+    if (!text || !pipes.vl || !vlImage) return;
+
+    input.value = '';
+    input.disabled = true;
+    sendBtn.disabled = true;
+
+    vlChatHistory.push({ role: 'user', content: text });
+    renderVLChat();
+
+    try {
+        const reply = await pipes.vl.run([...vlChatHistory], vlImage);
+        vlChatHistory.push({ role: 'assistant', content: reply });
+    } catch (err) {
+        vlChatHistory.push({ role: 'assistant', content: `Error: ${err.message}` });
+    }
+
+    renderVLChat();
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+};
+
+function renderVLChat() {
+    const el = document.getElementById('vl-chat-messages');
+    el.innerHTML = vlChatHistory.map(({ role, content }) => `
+        <div class="chat-msg ${role}">
+            <span class="chat-role">${role}</span>
+            <div class="chat-bubble">${escHtml(content)}</div>
+        </div>
+    `).join('');
+    el.scrollTop = el.scrollHeight;
+}
+
 // ── Drag-over styling ─────────────────────────────────────────────────────
 document.querySelectorAll('.drop-zone').forEach(zone => {
     zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
@@ -666,7 +767,8 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
         if (!file?.type.startsWith('image/')) return;
         const id = zone.id.replace('drop-', '');
         const fakeInput = { files: [file] };
-        onImageFile(id, fakeInput);
+        if (id === 'vl') onVLImageFile(fakeInput);
+        else onImageFile(id, fakeInput);
     });
 });
 </script>
