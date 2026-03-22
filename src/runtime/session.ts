@@ -15,8 +15,9 @@ export interface TensorOutput {
 // out of the browser bundle and onnxruntime-web out of the Node bundle.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _ort: any = null;
+const WASM_CDN = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
 
-async function getORT(device: Device) {
+async function getORT() {
     if (_ort) return _ort;
 
     const isNode = typeof process !== "undefined" && !!process.versions?.node;
@@ -24,14 +25,17 @@ async function getORT(device: Device) {
         _ort = await import("onnxruntime-node");
     } else {
         _ort = await import("onnxruntime-web");
-        if (device !== "webgpu") {
-            // Point WASM loader at the CDN — keeps the binary out of the bundle
-            // and off the WebGPU path entirely (loaded lazily only when needed).
-            _ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
-        }
     }
 
     return _ort;
+}
+
+function ensureWasmPaths(ort: unknown): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const o = ort as any;
+    if (o?.env?.wasm && !o.env.wasm.wasmPaths) {
+        o.env.wasm.wasmPaths = WASM_CDN;
+    }
 }
 
 export interface ExternalDataFile {
@@ -49,17 +53,41 @@ export class ONNXSession {
         device: Device,
         externalData?: ExternalDataFile[],
     ): Promise<ONNXSession> {
-        const ort = await getORT(device);
-        // WebGPU path: WASM EP excluded — binary never loaded on the WebGPU path.
-        // CPU path: WASM EP only.
-        const eps = device === "webgpu" ? ["webgpu"] : ["wasm"];
-        const session = await ort.InferenceSession.create(modelBuffer, {
-            executionProviders: eps,
-            // ONNX Runtime Web accepts external data as { path, data } objects.
-            // Ignored when undefined — zero cost on models without external data.
-            ...(externalData ? { externalData } : {}),
-        });
-        return new ONNXSession(session, ort);
+        const ort = await getORT();
+        const opts = externalData ? { externalData } : {};
+
+        // Try preferred EP first; if WebGPU session creation fails, fall back to
+        // WASM so the model can still run (slower, but beats a crash).
+        const candidates: string[][] = device === "webgpu" ? [["webgpu"], ["wasm"]] : [["wasm"]];
+
+        let lastErr: unknown;
+        for (const eps of candidates) {
+            if (eps[0] === "wasm") ensureWasmPaths(ort);
+            try {
+                const session = await ort.InferenceSession.create(modelBuffer, {
+                    executionProviders: eps,
+                    ...opts,
+                });
+                if (device === "webgpu" && eps[0] === "wasm") {
+                    console.warn("[transformers-js] WebGPU EP failed, fell back to WASM EP.");
+                }
+                return new ONNXSession(session, ort);
+            } catch (err) {
+                lastErr = err;
+                if (eps !== candidates[candidates.length - 1]) {
+                    console.warn(`[transformers-js] ${eps[0]} EP failed (${err}), trying wasm…`);
+                }
+            }
+        }
+
+        // Convert raw WASM exception pointers to readable Errors.
+        if (typeof lastErr === "number") {
+            throw new Error(
+                `ORT session creation failed with native exception (code ${lastErr}). ` +
+                `Check the browser console above for ORT error details.`,
+            );
+        }
+        throw lastErr;
     }
 
     async run(inputs: Record<string, TensorInput>): Promise<Record<string, TensorOutput>> {
