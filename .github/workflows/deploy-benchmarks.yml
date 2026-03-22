@@ -1,0 +1,43 @@
+name: Deploy benchmarks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "benchmark/**"
+      - "src/**"
+      - "scripts/build-benchmark.js"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+
+      - name: Build benchmark bundle
+        run: node scripts/build-benchmark.js
+
+      - name: Push to transformers-js.github.io
+        env:
+          PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+        run: |
+          git clone https://x-access-token:${PAGES_DEPLOY_TOKEN}@github.com/transformers-js/transformers-js.github.io.git _site
+
+          mkdir -p _site/benchmarks/dist
+          cp benchmark/latency.html _site/benchmarks/latency.html
+          cp benchmark/dist/latency.js _site/benchmarks/dist/latency.js
+
+          cd _site
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add benchmarks/
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "Deploy benchmarks from transformers-js@${GITHUB_SHA::7}"
+          git push
