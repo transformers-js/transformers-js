@@ -148,6 +148,12 @@ main {
   white-space: nowrap;
 }
 
+.tag-gated {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+
 .card-desc {
   font-size: 13px;
   color: var(--text-secondary);
@@ -527,6 +533,55 @@ main {
       </div>
     </div>
 
+    <!-- ── Fast Chat (350M) ── -->
+    <div class="card" id="card-sm">
+      <div class="card-header">
+        <div class="card-meta">
+          <div class="card-row">
+            <span class="card-name">Fast Chat</span>
+            <span class="tag">LFM2 350M</span>
+          </div>
+          <div class="card-desc">Smallest public LFM2 — fastest to load, runs entirely in-browser.</div>
+        </div>
+        <span class="card-size">~300 MB</span>
+        <button class="btn" id="btn-sm" onclick="loadModel('sm')">Load</button>
+      </div>
+      <div class="card-demo" id="demo-sm">
+        <div class="chat-messages" id="sm-messages"></div>
+        <div class="chat-input-row">
+          <textarea class="chat-input" id="sm-input" placeholder="Type a message…"
+            rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendSM()}"></textarea>
+          <button class="btn btn-primary" id="sm-send" onclick="sendSM()">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Chat 0.4B (gated) ── -->
+    <div class="card" id="card-md">
+      <div class="card-header">
+        <div class="card-meta">
+          <div class="card-row">
+            <span class="card-name">Chat</span>
+            <span class="tag">LFM2.5 0.4B</span>
+            <span class="tag tag-gated">🔒 gated</span>
+          </div>
+          <div class="card-desc">Requires an HF token — paste it in the header input, then accept the
+            <a href="https://huggingface.co/LiquidAI/LFM2.5-0.4B-Instruct-ONNX" target="_blank" rel="noopener"
+              style="color:inherit">model license ↗</a>.</div>
+        </div>
+        <span class="card-size">~400 MB</span>
+        <button class="btn" id="btn-md" onclick="loadModel('md')">Load</button>
+      </div>
+      <div class="card-demo" id="demo-md">
+        <div class="chat-messages" id="md-messages"></div>
+        <div class="chat-input-row">
+          <textarea class="chat-input" id="md-input" placeholder="Type a message…"
+            rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMD()}"></textarea>
+          <button class="btn btn-primary" id="md-send" onclick="sendMD()">Send</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Text Generation ── -->
     <div class="card" id="card-tg">
       <div class="card-header">
@@ -678,6 +733,8 @@ window.onTokenInput = function(value) { setHFToken(value); };
 
 // ── State ─────────────────────────────────────────────────────────────────
 const pipes = {};
+const smHistory    = [];
+const mdHistory    = [];
 const tgHistory    = [];
 const thinkHistory = [];
 const toolHistory  = [];
@@ -691,7 +748,19 @@ window.loadModel = async function(id) {
     btn.innerHTML = `<span class="spinner spinner-sm"></span> Loading…`;
 
     try {
-        if (id === 'cls') {
+        if (id === 'sm') {
+            pipes.sm = await pipeline('text-generation', {
+                model: 'onnx-community/LFM2-350M-ONNX',
+                device, precision: 'q4',
+            });
+            activateCard('sm');
+        } else if (id === 'md') {
+            pipes.md = await pipeline('text-generation', {
+                model: 'LiquidAI/LFM2.5-0.4B-Instruct-ONNX',
+                device, precision: 'q4',
+            });
+            activateCard('md');
+        } else if (id === 'cls') {
             pipes.cls = await pipeline('image-classification', {
                 model: 'Xenova/vit-base-patch16-224',
                 device, quantized: true,
@@ -816,6 +885,71 @@ function renderBars(container, results) {
     `).join('');
 }
 
+// ── Fast Chat (350M) ─────────────────────────────────────────────────────
+window.sendSM = async function() {
+    const input   = document.getElementById('sm-input');
+    const sendBtn = document.getElementById('sm-send');
+    const text = input.value.trim();
+    if (!text || !pipes.sm) return;
+
+    input.value = '';
+    input.disabled = true;
+    sendBtn.disabled = true;
+
+    smHistory.push({ role: 'user', content: text });
+    renderSimpleChat('sm-messages', smHistory);
+
+    try {
+        const reply = await pipes.sm.run([...smHistory]);
+        smHistory.push({ role: 'assistant', content: reply });
+    } catch (err) {
+        smHistory.push({ role: 'assistant', content: `Error: ${err instanceof Error ? err.message : String(err)}` });
+    }
+
+    renderSimpleChat('sm-messages', smHistory);
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+};
+
+// ── Chat 0.4B ────────────────────────────────────────────────────────────
+window.sendMD = async function() {
+    const input   = document.getElementById('md-input');
+    const sendBtn = document.getElementById('md-send');
+    const text = input.value.trim();
+    if (!text || !pipes.md) return;
+
+    input.value = '';
+    input.disabled = true;
+    sendBtn.disabled = true;
+
+    mdHistory.push({ role: 'user', content: text });
+    renderSimpleChat('md-messages', mdHistory);
+
+    try {
+        const reply = await pipes.md.run([...mdHistory]);
+        mdHistory.push({ role: 'assistant', content: reply });
+    } catch (err) {
+        mdHistory.push({ role: 'assistant', content: `Error: ${err instanceof Error ? err.message : String(err)}` });
+    }
+
+    renderSimpleChat('md-messages', mdHistory);
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+};
+
+function renderSimpleChat(elId, history) {
+    const el = document.getElementById(elId);
+    el.innerHTML = history.map(({ role, content }) => `
+        <div class="chat-msg ${role}">
+            <span class="chat-role">${role}</span>
+            <div class="chat-bubble">${escHtml(content)}</div>
+        </div>
+    `).join('');
+    el.scrollTop = el.scrollHeight;
+}
+
 // ── Text Generation ───────────────────────────────────────────────────────
 window.sendTG = async function() {
     const input   = document.getElementById('tg-input');
@@ -843,16 +977,7 @@ window.sendTG = async function() {
     input.focus();
 };
 
-function renderTG() {
-    const el = document.getElementById('tg-messages');
-    el.innerHTML = tgHistory.map(({ role, content }) => `
-        <div class="chat-msg ${role}">
-            <span class="chat-role">${role}</span>
-            <div class="chat-bubble">${escHtml(content)}</div>
-        </div>
-    `).join('');
-    el.scrollTop = el.scrollHeight;
-}
+function renderTG() { renderSimpleChat('tg-messages', tgHistory); }
 
 // ── Thinking ──────────────────────────────────────────────────────────────
 const THINK_SYSTEM = 'Think step by step before answering. ' +
