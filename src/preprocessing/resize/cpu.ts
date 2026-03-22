@@ -74,10 +74,12 @@ function bilinear(image: ImageData, size: { width: number; height: number }): Im
     return { data: out, width: dw, height: dh, channels: c };
 }
 
-// ── Bicubic (Keys cubic, a = -0.75 — matches PIL BICUBIC and OpenCV) ───────
+// ── Bicubic (Keys cubic, a = -0.5 — matches PIL BICUBIC) ───────────────────
+// Note: OpenCV and PyTorch use a = -0.75; PIL uses a = -0.5.
+// HuggingFace transformers calls PIL for resize, so we match PIL.
 
 function cubicWeight(t: number): number {
-    const a = -0.75;
+    const a = -0.5;
     const at = Math.abs(t);
     if (at <= 1) return (a + 2) * at ** 3 - (a + 3) * at ** 2 + 1;
     if (at < 2)  return a * at ** 3 - 5 * a * at ** 2 + 8 * a * at - 4 * a;

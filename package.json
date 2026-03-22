@@ -17,7 +17,8 @@
     "test:watch": "vitest",
     "dev": "vitest --reporter=verbose",
     "sync": "tsx codegen/sync.ts",
-    "sync:init": "tsx codegen/sync.ts --init"
+    "sync:init": "tsx codegen/sync.ts --init",
+    "benchmark": "tsx benchmark/compare.ts"
   },
   "dependencies": {
     "@huggingface/tokenizers": "^0.1.3",

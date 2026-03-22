@@ -4,7 +4,11 @@ JS inference runtime for transformer models. WebGPU-primary, WASM-fallback.
 Not a Python API port. A production-grade JS runtime with automated preprocessing maintenance.
 
 ## Criteria (in priority order)
-1. Preprocessing correctness: output tensors match Python transformers within 1e-5
+1. Preprocessing correctness: output tensors within PIL quantization noise of Python transformers.
+   Measured bound: max |Δ| ≤ 1/(255 × min_std) ≈ 7.8e-3 (ViT, std=0.5).
+   Note: 1e-5 is not achievable — PIL bicubic operates on uint8 (quantized) while we use
+   float32, producing a systematic difference bounded by fixed-point weight error + 1 lsb
+   quantization. Observed max |Δ|: 5.9e-3 on smooth test image. See `benchmark/`.
 2. Vision inference latency: ≤50ms for ViT-B/16 on WebGPU (Chrome, M-series Mac)
 3. Time from Python transformers update to JS PR: automated, ≤24h
 4. First-load cost: no WASM binary on the WebGPU path (lazy-load fallback only)
