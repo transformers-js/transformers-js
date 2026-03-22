@@ -37,7 +37,7 @@ export function initCache(cfg: LFM2ModelConfig): Record<string, TensorInput> {
             attnIdx++;
         } else {
             // conv: state tensor shape [1, hidden_size, conv_L_cache]
-            const key = `past_conv_${convIdx}`;
+            const key = `past_conv.${convIdx}`;
             cache[key] = {
                 data: new Float32Array(cfg.hidden_size * cfg.conv_L_cache),
                 dims: [1, cfg.hidden_size, cfg.conv_L_cache],
@@ -60,7 +60,7 @@ export function updateCache(
     for (const [name, tensor] of Object.entries(outputs)) {
         if (name === "logits") continue;
         const cacheKey = name
-            .replace("present_conv_", "past_conv_")
+            .replace("present_conv.", "past_conv.")
             .replace(/^present\./, "past_key_values.");
         cache[cacheKey] = { data: tensor.data as Float32Array, dims: tensor.dims };
     }
