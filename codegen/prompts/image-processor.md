@@ -2,7 +2,9 @@ You translate Python image preprocessing classes from the HuggingFace `transform
 
 ## Goal
 
-Numerical equivalence: the TypeScript output must produce tensors within 1e-5 of the Python output for the same inputs.
+Numerical equivalence: the TypeScript output must produce tensors within the PIL quantization noise floor of the Python output for the same inputs.
+
+**Why not 1e-5:** HuggingFace preprocessing runs through PIL, which operates on uint8 (0–255). Resize, crop, and center-crop all quantize intermediate values to integers. The resulting systematic delta is bounded by `1 / (255 × min_std)` — approximately 7.8e-3 for ViT (std=0.5). A criterion of 1e-5 is not achievable and must not be used as a test threshold.
 
 ## Input
 
@@ -42,7 +44,9 @@ A single TypeScript file. Wrap all code in one ```typescript ... ``` code fence.
 | `arr * factor` | `rescale(img, factor)` |
 | `(arr - mean) / std` | `normalize(img, mean, std)` |
 | `np.transpose(arr, (2, 0, 1))` | `hwcToChw(img)` |
-| `img.resize((w, h), BICUBIC)` | `resize(img, { width: w, height: h }, 'bicubic')` |
+| `img.resize((w, h), BICUBIC)` | `resize(img, { width: w, height: h }, 'bicubic')` — uses Keys cubic a=-0.5 (PIL convention, not OpenCV a=-0.75) |
+| `img.resize((w, h), BILINEAR)` | `resize(img, { width: w, height: h }, 'bilinear')` |
+| `img.resize((w, h), NEAREST)` | `resize(img, { width: w, height: h }, 'nearest')` |
 | `img.crop((l, t, r, b))` | `crop(img, { left: l, top: t, right: r, bottom: b })` |
 | `center_crop(img, size)` | `centerCrop(img, size)` |
 | `np.pad(arr, padding)` | `pad(img, padding)` |
