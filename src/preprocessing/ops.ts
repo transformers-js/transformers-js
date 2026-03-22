@@ -95,18 +95,18 @@ export function pad(
 }
 
 /** Resize an image to the target size.
- *  CPU-only for now; WebGPU path is wired in runtime/ and injected at init. */
+ *  Async to accommodate both CPU and WebGPU paths.
+ *  Injected by initRuntime() — call that before any preprocessing. */
 export let resize: (
     image: ImageData,
     size: { width: number; height: number },
     filter?: ResampleFilter,
-) => ImageData = () => {
-    throw new Error("resize not initialized — call initRuntime() first");
-};
+) => Promise<ImageData> = () =>
+    Promise.reject(new Error("resize not initialized — call initRuntime() first"));
 
-/** Injected by runtime/ on startup with the appropriate CPU or WebGPU implementation. */
+/** Injected by runtime/index.ts on startup. */
 export function setResizeImpl(
-    impl: (image: ImageData, size: { width: number; height: number }, filter?: ResampleFilter) => ImageData,
+    impl: (image: ImageData, size: { width: number; height: number }, filter?: ResampleFilter) => Promise<ImageData>,
 ): void {
     resize = impl;
 }
