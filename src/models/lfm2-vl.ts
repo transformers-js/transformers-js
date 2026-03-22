@@ -1,0 +1,288 @@
+import { fetchRaw, fetchJSON } from "../runtime/hub.js";
+import { ONNXSession } from "../runtime/session.js";
+import { LFM2Tokenizer, type Message } from "../tokenization/lfm2-tokenizer.js";
+import { initCache, updateCache, type LFM2ModelConfig } from "../generation/loop.js";
+import { argmax, sampleTopP, type SamplingOptions } from "../generation/sampling.js";
+import { preprocessVLImage, TOKENS_PER_TILE } from "../preprocessing/lfm2-vl.js";
+import type { Device } from "../runtime/index.js";
+import type { ImageData } from "../preprocessing/ops.js";
+
+export type LFM2VLPrecision = "q4" | "q8" | "fp16";
+
+export interface LFM2VLOptions {
+    device?: Device;
+    /**
+     * Decoder precision. Encoder always uses fp16.
+     * - "q4"  (~1.5GB, WebGPU recommended)
+     * - "q8"  (~2.2GB)
+     * - "fp16" (~3.2GB, server)
+     * Default: "q4"
+     */
+    precision?: LFM2VLPrecision;
+}
+
+export interface VLGenerateOptions {
+    maxNewTokens?: number;
+    sampling?: SamplingOptions;
+}
+
+interface VLConfig {
+    image_token_id: number;
+    max_tiles: number;
+    text_config: LFM2ModelConfig & { eos_token_id: number };
+}
+
+// Encoder always fp16; only decoder varies.
+const DECODER_FILE: Record<LFM2VLPrecision, [string, string]> = {
+    q4:   ["onnx/decoder_q4.onnx",   "onnx/decoder_q4.onnx_data"],
+    q8:   ["onnx/decoder_q8.onnx",   "onnx/decoder_q8.onnx_data"],
+    fp16: ["onnx/decoder_fp16.onnx", "onnx/decoder_fp16.onnx_data"],
+};
+
+export class LFM2VLForConditionalGeneration {
+    private constructor(
+        private readonly embedImages: ONNXSession,
+        private readonly embedTokens: ONNXSession,
+        private readonly decoder: ONNXSession,
+        private readonly tokenizer: LFM2Tokenizer,
+        private readonly modelCfg: LFM2ModelConfig,
+        private readonly eosTokenId: number,
+        private readonly imageTokenId: number,
+        private readonly maxTiles: number,
+        private readonly hasPositionIds: boolean,
+        private readonly hiddenSize: number,
+    ) {}
+
+    static async fromHub(modelId: string, options: LFM2VLOptions = {}): Promise<LFM2VLForConditionalGeneration> {
+        const { device = "webgpu", precision = "q4" } = options;
+        const [decoderFile, decoderData] = DECODER_FILE[precision];
+
+        const [
+            embedImagesBuffer, embedImagesData,
+            embedTokensBuffer, embedTokensData,
+            decoderBuffer, decoderDataBuffer,
+            config,
+            tokenizer,
+        ] = await Promise.all([
+            fetchRaw(modelId, "onnx/embed_images_fp16.onnx"),
+            fetchRaw(modelId, "onnx/embed_images_fp16.onnx_data"),
+            fetchRaw(modelId, "onnx/embed_tokens_fp16.onnx"),
+            fetchRaw(modelId, "onnx/embed_tokens_fp16.onnx_data"),
+            fetchRaw(modelId, decoderFile),
+            fetchRaw(modelId, decoderData),
+            fetchJSON<VLConfig>(modelId, "config.json"),
+            LFM2Tokenizer.fromHub(modelId),
+        ]);
+
+        const [embedImagesSession, embedTokensSession, decoderSession] = await Promise.all([
+            ONNXSession.load(embedImagesBuffer, device, [
+                { path: "embed_images_fp16.onnx_data", data: embedImagesData },
+            ]),
+            ONNXSession.load(embedTokensBuffer, device, [
+                { path: "embed_tokens_fp16.onnx_data", data: embedTokensData },
+            ]),
+            ONNXSession.load(decoderBuffer, device, [
+                { path: decoderData.split("/").pop()!, data: decoderDataBuffer },
+            ]),
+        ]);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const decInputNames: string[] = (decoderSession as any).session.inputNames ?? [];
+        const hasPositionIds = decInputNames.includes("position_ids");
+
+        const textCfg = config.text_config;
+
+        return new LFM2VLForConditionalGeneration(
+            embedImagesSession,
+            embedTokensSession,
+            decoderSession,
+            tokenizer,
+            textCfg,
+            textCfg.eos_token_id,
+            config.image_token_id,
+            config.max_tiles,
+            hasPositionIds,
+            textCfg.hidden_size,
+        );
+    }
+
+    async chat(
+        messages: Message[],
+        image: ImageData,
+        options: VLGenerateOptions = {},
+    ): Promise<string> {
+        const { maxNewTokens = 512, sampling } = options;
+
+        // ── 1. Image preprocessing ─────────────────────────────────────────
+        const { pixelValues, pixelAttentionMask, spatialShapes, numTiles } =
+            await preprocessVLImage(image, this.maxTiles);
+
+        const imgOut = await this.embedImages.run({
+            pixel_values:        { data: pixelValues,        dims: [numTiles, 3, 512, 512] },
+            pixel_attention_mask:{ data: pixelAttentionMask, dims: [numTiles, 512, 512] },
+            spatial_shapes:      { data: spatialShapes,      dims: [numTiles, 2] },
+        });
+
+        // image_features: [numTiles, TOKENS_PER_TILE, hiddenSize]
+        const imageFeatures = imgOut["image_features"]!.data as Float32Array;
+        const imgEmbedTokens = numTiles * TOKENS_PER_TILE;
+
+        // ── 2. Tokenize with image placeholder ─────────────────────────────
+        // Inject <image> before the first user message content.
+        const vlMessages = injectImageToken(messages);
+        const promptIds = this.tokenizer.encodeChat(vlMessages);
+
+        // ── 3. Embed tokens ────────────────────────────────────────────────
+        const inputIds = new BigInt64Array(promptIds.map(BigInt));
+        const tokOut = await this.embedTokens.run({
+            input_ids: { data: inputIds, dims: [1, promptIds.length] },
+        });
+        const tokenEmbeds = tokOut["inputs_embeds"]!.data as Float32Array;
+
+        // ── 4. Splice image embeddings at image_token positions ────────────
+        // Each image_token_id placeholder expands to imgEmbedTokens embedding rows.
+        const prefillEmbeds = spliceImageEmbeds(
+            tokenEmbeds,
+            promptIds,
+            this.imageTokenId,
+            imageFeatures,
+            imgEmbedTokens,
+            this.hiddenSize,
+        );
+        const prefillSeqLen = prefillEmbeds.length / this.hiddenSize;
+
+        // ── 5. Prefill decoder ─────────────────────────────────────────────
+        const cache = initCache(this.modelCfg);
+        const attnMask = new BigInt64Array(prefillSeqLen).fill(1n);
+
+        const prefillInputs: Record<string, import("../runtime/session.js").TensorInput> = {
+            inputs_embeds: { data: prefillEmbeds, dims: [1, prefillSeqLen, this.hiddenSize] },
+            attention_mask: { data: attnMask, dims: [1, prefillSeqLen] },
+            ...cache,
+        };
+        if (this.hasPositionIds) {
+            prefillInputs["position_ids"] = {
+                data: new BigInt64Array(prefillSeqLen).map((_, i) => BigInt(i)),
+                dims: [1, prefillSeqLen],
+            };
+        }
+
+        const prefillOut = await this.decoder.run(prefillInputs);
+        updateCache(cache, prefillOut);
+
+        const vocabSize = prefillOut["logits"]!.dims[2]!;
+        const lastLogits = new Float32Array(
+            (prefillOut["logits"]!.data as Float32Array).buffer,
+            (prefillSeqLen - 1) * vocabSize * 4,
+            vocabSize,
+        );
+        let nextToken = sampling ? sampleTopP(lastLogits, sampling) : argmax(lastLogits);
+        const generated: number[] = [nextToken];
+
+        // ── 6. Decode loop ─────────────────────────────────────────────────
+        let pastLen = prefillSeqLen;
+
+        while (nextToken !== this.eosTokenId && generated.length < maxNewTokens) {
+            // Embed single new token
+            const singleId = new BigInt64Array([BigInt(nextToken)]);
+            const embedOut = await this.embedTokens.run({
+                input_ids: { data: singleId, dims: [1, 1] },
+            });
+            const singleEmbed = embedOut["inputs_embeds"]!.data as Float32Array;
+
+            const decInputs: Record<string, import("../runtime/session.js").TensorInput> = {
+                inputs_embeds:  { data: singleEmbed, dims: [1, 1, this.hiddenSize] },
+                attention_mask: { data: new BigInt64Array(pastLen + 1).fill(1n), dims: [1, pastLen + 1] },
+                ...cache,
+            };
+            if (this.hasPositionIds) {
+                decInputs["position_ids"] = {
+                    data: new BigInt64Array([BigInt(pastLen)]),
+                    dims: [1, 1],
+                };
+            }
+
+            const out = await this.decoder.run(decInputs);
+            updateCache(cache, out);
+            pastLen++;
+
+            nextToken = sampling
+                ? sampleTopP(out["logits"]!.data as Float32Array, sampling)
+                : argmax(out["logits"]!.data as Float32Array);
+            generated.push(nextToken);
+        }
+
+        if (generated[generated.length - 1] === this.eosTokenId) generated.pop();
+        return this.tokenizer.decode(generated);
+    }
+
+    dispose(): void {
+        this.embedImages.dispose();
+        this.embedTokens.dispose();
+        this.decoder.dispose();
+    }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Inject the <image> token before the first user message's content so the
+ * tokenizer sees it as a special token and maps it to image_token_id=396.
+ */
+function injectImageToken(messages: Message[]): Message[] {
+    const out: Message[] = [];
+    let injected = false;
+    for (const msg of messages) {
+        if (!injected && msg.role === "user") {
+            out.push({ ...msg, content: `<image>\n${msg.content}` });
+            injected = true;
+        } else {
+            out.push(msg);
+        }
+    }
+    return out;
+}
+
+/**
+ * Build a new inputs_embeds Float32Array where each image_token_id in promptIds
+ * is replaced by imgEmbedTokens rows of image embeddings from imageFeatures.
+ *
+ * imageFeatures layout: [numTiles * TOKENS_PER_TILE, hiddenSize] (flattened).
+ */
+function spliceImageEmbeds(
+    tokenEmbeds: Float32Array,   // [seqLen, hiddenSize] flattened (from embed_tokens output [1, seqLen, hiddenSize])
+    promptIds: number[],
+    imageTokenId: number,
+    imageFeatures: Float32Array, // [numTiles * tokensPerTile, hiddenSize] flattened
+    imgEmbedTokens: number,
+    hiddenSize: number,
+): Float32Array {
+    // Count output tokens: replace each image_token_id with imgEmbedTokens rows
+    const outSeqLen = promptIds.reduce(
+        (acc, id) => acc + (id === imageTokenId ? imgEmbedTokens : 1),
+        0,
+    );
+    const out = new Float32Array(outSeqLen * hiddenSize);
+
+    let outPos = 0;
+    let imgFeaturePos = 0; // position in imageFeatures (in tokens)
+
+    for (let i = 0; i < promptIds.length; i++) {
+        if (promptIds[i] === imageTokenId) {
+            // Copy imgEmbedTokens rows from imageFeatures
+            const src = imageFeatures.subarray(
+                imgFeaturePos * hiddenSize,
+                (imgFeaturePos + imgEmbedTokens) * hiddenSize,
+            );
+            out.set(src, outPos * hiddenSize);
+            outPos += imgEmbedTokens;
+            imgFeaturePos += imgEmbedTokens;
+        } else {
+            // Copy one token embedding from tokenEmbeds (batch dim 0 already stripped)
+            out.set(tokenEmbeds.subarray(i * hiddenSize, (i + 1) * hiddenSize), outPos * hiddenSize);
+            outPos++;
+        }
+    }
+
+    return out;
+}

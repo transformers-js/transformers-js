@@ -53,7 +53,7 @@ export function initCache(cfg: LFM2ModelConfig): Record<string, TensorInput> {
  * Update cache from session outputs.
  * Renames: present_conv_N → past_conv_N, present.N.key/value → past_key_values.N.key/value
  */
-function updateCache(
+export function updateCache(
     cache: Record<string, TensorInput>,
     outputs: Record<string, { data: unknown; dims: readonly number[] }>,
 ): void {

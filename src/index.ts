@@ -10,6 +10,12 @@ export type { Message, GenerateOptions } from "./pipeline/text-generation.js";
 export { LFM2ForCausalLM } from "./models/lfm2.js";
 export type { LFM2Options, LFM2Precision } from "./models/lfm2.js";
 
+export { ImageTextToTextPipeline } from "./pipeline/image-text-to-text.js";
+export type { LFM2VLOptions, VLGenerateOptions } from "./pipeline/image-text-to-text.js";
+
+export { LFM2VLForConditionalGeneration } from "./models/lfm2-vl.js";
+export type { LFM2VLPrecision } from "./models/lfm2-vl.js";
+
 export { ImageClassificationPipeline } from "./pipeline/image-classification.js";
 export type { ClassificationResult, ImageClassificationOptions } from "./pipeline/image-classification.js";
 

@@ -1,0 +1,98 @@
+import { resize, rescale, normalize, hwcToChw, crop, type ImageData } from "./ops.js";
+
+const TILE_SIZE = 512;
+const PATCH_SIZE = 16;
+const DOWNSAMPLE = 2;
+const PATCHES_PER_SIDE = TILE_SIZE / PATCH_SIZE / DOWNSAMPLE; // 16
+export const TOKENS_PER_TILE = PATCHES_PER_SIDE * PATCHES_PER_SIDE; // 256
+
+const IMAGE_MEAN = [0.5, 0.5, 0.5];
+const IMAGE_STD  = [0.5, 0.5, 0.5];
+
+export interface VLImageTensors {
+    pixelValues:         Float32Array;    // [numTiles, 3, 512, 512]
+    pixelAttentionMask:  BigInt64Array;   // [numTiles, 512, 512]
+    spatialShapes:       BigInt64Array;   // [numTiles, 2]
+    numTiles:            number;
+}
+
+/**
+ * Choose the (rows, cols) tiling that maximises image resolution within
+ * maxContentTiles. The thumbnail is handled separately, so this returns
+ * only the content-tile grid.
+ */
+function bestTiling(w: number, h: number, maxContent: number): [number, number] {
+    let bestRows = 1, bestCols = 1, bestScale = 0;
+    for (let rows = 1; rows <= maxContent; rows++) {
+        for (let cols = 1; cols <= maxContent; cols++) {
+            if (rows * cols > maxContent) continue;
+            const scale = Math.min(
+                (rows * TILE_SIZE) / h,
+                (cols * TILE_SIZE) / w,
+            );
+            if (scale > bestScale) {
+                bestScale = scale;
+                [bestRows, bestCols] = [rows, cols];
+            }
+        }
+    }
+    return [bestRows, bestCols];
+}
+
+async function normalizeTile(image: ImageData): Promise<Float32Array> {
+    const resized     = await resize(image, { width: TILE_SIZE, height: TILE_SIZE }, "bilinear");
+    const rescaled    = rescale(resized, 1 / 255);
+    const normalized  = normalize(rescaled, IMAGE_MEAN, IMAGE_STD);
+    return hwcToChw(normalized);
+}
+
+/**
+ * Tile an image for LFM2-VL:
+ *   - Split into up to (maxTiles-1) content tiles arranged in a bestTiling grid
+ *   - Append one thumbnail (whole image resized to 512×512)
+ *
+ * Returns flat Float32Array tensors ready to feed embed_images.onnx.
+ */
+export async function preprocessVLImage(
+    image: ImageData,
+    maxTiles = 10,
+): Promise<VLImageTensors> {
+    const maxContent = maxTiles - 1; // reserve 1 slot for thumbnail
+    const [rows, cols] = bestTiling(image.width, image.height, maxContent);
+
+    const tilePxls: Float32Array[] = [];
+
+    // Content tiles — divide image into rows×cols crops
+    const cropW = Math.floor(image.width  / cols);
+    const cropH = Math.floor(image.height / rows);
+
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const left   = c * cropW;
+            const top    = r * cropH;
+            const right  = c < cols - 1 ? left + cropW : image.width;
+            const bottom = r < rows - 1 ? top  + cropH : image.height;
+            tilePxls.push(await normalizeTile(crop(image, { left, top, right, bottom })));
+        }
+    }
+
+    // Thumbnail — whole image at 512×512
+    tilePxls.push(await normalizeTile(image));
+
+    const numTiles     = tilePxls.length;
+    const pixPerTile   = 3 * TILE_SIZE * TILE_SIZE;
+    const pixelValues  = new Float32Array(numTiles * pixPerTile);
+    for (let i = 0; i < numTiles; i++) pixelValues.set(tilePxls[i]!, i * pixPerTile);
+
+    // Attention mask — all ones (no padding; each tile is exactly 512×512)
+    const pixelAttentionMask = new BigInt64Array(numTiles * TILE_SIZE * TILE_SIZE).fill(1n);
+
+    // Spatial shapes — [h_patches, w_patches] per tile after downsampling
+    const spatialShapes = new BigInt64Array(numTiles * 2);
+    for (let i = 0; i < numTiles; i++) {
+        spatialShapes[i * 2]     = BigInt(PATCHES_PER_SIDE);
+        spatialShapes[i * 2 + 1] = BigInt(PATCHES_PER_SIDE);
+    }
+
+    return { pixelValues, pixelAttentionMask, spatialShapes, numTiles };
+}
