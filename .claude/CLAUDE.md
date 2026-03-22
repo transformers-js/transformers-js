@@ -24,7 +24,7 @@ A GitHub Actions workflow watches `huggingface/transformers` for changes to
 translation via Claude API (numpy → tensor ops) and opens a PR. Human reviews the
 output — not the translation process.
 
-Script lives in `codegen/sync-preprocessing.js`. Never manually edit files in
+Script lives in `codegen/sync.ts`. Never manually edit files in
 `src/preprocessing/` that are marked `@generated`.
 
 ## Device strategy
@@ -42,6 +42,10 @@ generation/       Sampling, KV-cache, streaming, stopping criteria
 pipeline/         Task registry and user-facing API
 codegen/          Python→JS translator scripts and sync workflow
 ```
+
+## Distribution
+- Published to GitHub Packages as `@transformers-js/transformers-js` (single consumer for now)
+- Migrate to npm when ready for external consumers — one `publishConfig` change
 
 ## Out of scope
 - Model training
