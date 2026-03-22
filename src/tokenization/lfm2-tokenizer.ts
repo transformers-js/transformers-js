@@ -26,8 +26,8 @@ export class LFM2Tokenizer {
     }
 
     /** Apply chat template and encode to token ids. */
-    encodeChat(messages: Message[]): number[] {
-        const text = this.applyChatTemplate(messages);
+    encodeChat(messages: Message[], tools?: object[]): number[] {
+        const text = this.applyChatTemplate(messages, tools);
         const enc = this.tokenizer.encode(text, { add_special_tokens: false });
         return enc.ids;
     }
@@ -38,12 +38,31 @@ export class LFM2Tokenizer {
     }
 
     /**
-     * Static chat template matching the model's Jinja2 template.
-     * <|im_start|>role\ncontent<|im_end|>\n…<|im_start|>assistant\n
+     * Mirrors the model's Jinja2 chat template:
+     * - Extracts system message if first
+     * - Injects tools as "List of tools: [...]" appended to system prompt
+     * - Formats: <|im_start|>role\ncontent<|im_end|>\n…<|im_start|>assistant\n
      */
-    private applyChatTemplate(messages: Message[]): string {
+    private applyChatTemplate(messages: Message[], tools?: object[]): string {
+        const msgs = [...messages];
+        let systemPrompt = "";
+
+        const first = msgs[0];
+        if (first?.role === "system") {
+            systemPrompt = first.content;
+            msgs.shift();
+        }
+
+        if (tools && tools.length > 0) {
+            const toolsStr = `List of tools: [${tools.map(t => JSON.stringify(t)).join(", ")}]`;
+            systemPrompt = systemPrompt ? `${systemPrompt}\n${toolsStr}` : toolsStr;
+        }
+
         let out = "";
-        for (const { role, content } of messages) {
+        if (systemPrompt) {
+            out += `<|im_start|>system\n${systemPrompt}<|im_end|>\n`;
+        }
+        for (const { role, content } of msgs) {
             out += `<|im_start|>${role}\n${content}<|im_end|>\n`;
         }
         out += "<|im_start|>assistant\n";

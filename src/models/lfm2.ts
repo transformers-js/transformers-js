@@ -16,6 +16,8 @@ export interface LFM2Options {
 export interface GenerateOptions {
     maxNewTokens?: number;
     sampling?: SamplingOptions;
+    /** Tool definitions to inject into the system prompt (JSON Schema format). */
+    tools?: object[];
 }
 
 interface FullConfig extends LFM2ModelConfig {
@@ -73,7 +75,7 @@ export class LFM2ForCausalLM {
     }
 
     async chat(messages: Message[], options: GenerateOptions = {}): Promise<string> {
-        const promptIds = this.tokenizer.encodeChat(messages);
+        const promptIds = this.tokenizer.encodeChat(messages, options.tools);
         const genCfg = {
             eosTokenId: this.eosTokenId,
             ...(options.maxNewTokens !== undefined ? { maxNewTokens: options.maxNewTokens } : {}),

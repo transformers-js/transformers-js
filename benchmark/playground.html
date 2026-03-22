@@ -357,6 +357,82 @@ main {
   outline-offset: 2px;
 }
 
+/* ── Think block ── */
+.think-block {
+  align-self: flex-start;
+  max-width: 80%;
+  margin-bottom: -4px;
+}
+.think-block summary {
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.think-block summary::before {
+  content: "▶";
+  font-size: 8px;
+  transition: transform .15s;
+}
+.think-block[open] summary::before { transform: rotate(90deg); }
+.think-block-content {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-style: italic;
+  line-height: 1.6;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-left: 2px solid var(--border-strong);
+  border-radius: 0 var(--r) var(--r) 0;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* ── Tool events ── */
+.tool-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.tool-chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 20px;
+  background: var(--accent-light);
+  color: var(--accent);
+  border: 1px solid rgba(45,106,79,.3);
+}
+.tool-event {
+  align-self: center;
+  max-width: 90%;
+}
+.tool-event-inner {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: var(--r);
+  display: inline-block;
+  word-break: break-all;
+}
+.tool-event.call .tool-event-inner {
+  background: #e8f0f8;
+  color: #1a4870;
+  border: 1px solid #b8cce0;
+}
+.tool-event.result .tool-event-inner {
+  background: #f0f8e8;
+  color: #2a5010;
+  border: 1px solid #b8d898;
+}
+
 /* ── Loading spinner ── */
 @keyframes spin { to { transform: rotate(360deg); } }
 .spinner {
@@ -379,14 +455,9 @@ main {
 <header>
   <span class="header-title">transformers-js</span>
   <span class="header-spacer"></span>
-  <div style="display:flex;align-items:center;gap:6px">
-    <input type="password" id="hf-token" placeholder="HF token (gated models)"
-      style="height:28px;padding:0 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg);color:var(--text);font-family:var(--font);font-size:12px;width:180px"
-      oninput="onTokenInput(this.value)">
-    <a href="https://huggingface.co/LiquidAI/LFM2.5-VL-1.6B-ONNX" target="_blank" rel="noopener"
-      style="font-size:11px;color:var(--text-muted);text-decoration:none;white-space:nowrap"
-      title="Accept license, then get a token at huggingface.co/settings/tokens">Accept&nbsp;license&nbsp;↗</a>
-  </div>
+  <input type="password" id="hf-token" placeholder="HF token (gated models)"
+    style="height:28px;padding:0 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg);color:var(--text);font-family:var(--font);font-size:12px;width:180px"
+    oninput="onTokenInput(this.value)">
   <a class="header-link" href="https://github.com/transformers-js/transformers-js" target="_blank" rel="noopener">
     <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
       <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
@@ -470,41 +541,59 @@ main {
         <button class="btn" id="btn-tg" onclick="loadModel('tg')">Load</button>
       </div>
       <div class="card-demo" id="demo-tg">
-        <div class="chat-messages" id="chat-messages"></div>
+        <div class="chat-messages" id="tg-messages"></div>
         <div class="chat-input-row">
-          <textarea class="chat-input" id="chat-input" placeholder="Type a message…"
-            rows="1" onkeydown="onChatKey(event)"></textarea>
-          <button class="btn btn-primary" id="chat-send" onclick="sendChat()">Send</button>
+          <textarea class="chat-input" id="tg-input" placeholder="Type a message…"
+            rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendTG()}"></textarea>
+          <button class="btn btn-primary" id="tg-send" onclick="sendTG()">Send</button>
         </div>
       </div>
     </div>
 
-    <!-- ── Vision Chat ── -->
-    <div class="card" id="card-vl">
+    <!-- ── Thinking ── -->
+    <div class="card" id="card-think">
       <div class="card-header">
         <div class="card-meta">
           <div class="card-row">
-            <span class="card-name">Vision Chat</span>
-            <span class="tag">LFM2.5-VL 1.6B</span>
+            <span class="card-name">Thinking</span>
+            <span class="tag">LFM2.5 1.2B</span>
           </div>
-          <div class="card-desc">Ask questions about images using a multimodal Liquid Foundation Model.</div>
+          <div class="card-desc">Same model, thinking mode — reasoning steps shown before the answer.</div>
         </div>
-        <span class="card-size">1.5 GB</span>
-        <button class="btn" id="btn-vl" onclick="loadModel('vl')">Load</button>
+        <span class="card-size">shared</span>
+        <button class="btn" id="btn-think" onclick="loadModel('think')">Load</button>
       </div>
-      <div class="card-demo" id="demo-vl">
-        <div class="drop-zone" id="drop-vl" style="margin-bottom:12px">
-          Drop an image here or click to browse
-          <input type="file" accept="image/*" onchange="onVLImageFile(this)">
-        </div>
-        <div id="vl-image-row" style="display:none;margin-bottom:12px">
-          <img id="preview-vl" class="preview-img" style="display:block;width:80px;height:80px">
-        </div>
-        <div class="chat-messages" id="vl-chat-messages"></div>
+      <div class="card-demo" id="demo-think">
+        <div class="chat-messages" id="think-messages"></div>
         <div class="chat-input-row">
-          <textarea class="chat-input" id="vl-chat-input" placeholder="Ask something about the image…"
-            rows="1" onkeydown="onVLChatKey(event)"></textarea>
-          <button class="btn btn-primary" id="vl-chat-send" onclick="sendVLChat()">Send</button>
+          <textarea class="chat-input" id="think-input" placeholder="Ask something that benefits from step-by-step reasoning…"
+            rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendThink()}"></textarea>
+          <button class="btn btn-primary" id="think-send" onclick="sendThink()">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Tool Calling ── -->
+    <div class="card" id="card-tool">
+      <div class="card-header">
+        <div class="card-meta">
+          <div class="card-row">
+            <span class="card-name">Tool Calling</span>
+            <span class="tag">LFM2.5 1.2B</span>
+            <span class="tag">WebMCP</span>
+          </div>
+          <div class="card-desc">Model calls browser-registered tools via <code style="font-family:var(--mono);font-size:11px">navigator.modelContext</code>.</div>
+        </div>
+        <span class="card-size">shared</span>
+        <button class="btn" id="btn-tool" onclick="loadModel('tool')">Load</button>
+      </div>
+      <div class="card-demo" id="demo-tool">
+        <div class="tool-chips" id="tool-chips"></div>
+        <div class="chat-messages" id="tool-messages"></div>
+        <div class="chat-input-row">
+          <textarea class="chat-input" id="tool-input" placeholder="Try: What time is it? / Calculate 17 * 23 / Weather in Tokyo"
+            rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendTool()}"></textarea>
+          <button class="btn btn-primary" id="tool-send" onclick="sendTool()">Send</button>
         </div>
       </div>
     </div>
@@ -515,21 +604,87 @@ main {
 <script type="module">
 import { initRuntime, pipeline, setHFToken } from "./dist/playground.js";
 
+// ── WebMCP polyfill ────────────────────────────────────────────────────────
+if (!navigator.modelContext) {
+    const _tools = new Map();
+    navigator.modelContext = {
+        registerTool({ name, description, input_schema, execute }) {
+            _tools.set(name, { name, description, input_schema, execute });
+        },
+        getTools() {
+            return [..._tools.values()].map(({ name, description, input_schema }) =>
+                ({ name, description, input_schema }));
+        },
+        async execute(name, input) {
+            const tool = _tools.get(name);
+            if (!tool) throw new Error(`Unknown tool: ${name}`);
+            return String(await tool.execute(input));
+        },
+    };
+}
+
+// ── Demo tools ────────────────────────────────────────────────────────────
+navigator.modelContext.registerTool({
+    name: 'get_current_time',
+    description: 'Returns the current date and time in UTC.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+    execute: () => new Date().toUTCString(),
+});
+
+navigator.modelContext.registerTool({
+    name: 'calculate',
+    description: 'Evaluates a mathematical expression and returns the numeric result.',
+    input_schema: {
+        type: 'object',
+        properties: { expression: { type: 'string', description: 'Math expression, e.g. "12 * 34" or "Math.sqrt(144)"' } },
+        required: ['expression'],
+    },
+    execute: ({ expression }) => {
+        // Restrict to safe math: numbers, operators, parens, and Math.*
+        const safe = /^[0-9+\-*/().,\s%^MathsqrtpowlogabsflorceilroundPI]+$/.test(expression);
+        if (!safe) return 'Error: unsafe expression';
+        try { return String(Function('"use strict"; return (' + expression + ')')()) }
+        catch { return 'Error: could not evaluate' }
+    },
+});
+
+navigator.modelContext.registerTool({
+    name: 'get_weather',
+    description: 'Returns current weather conditions for a city (demo data).',
+    input_schema: {
+        type: 'object',
+        properties: { city: { type: 'string', description: 'City name' } },
+        required: ['city'],
+    },
+    execute: ({ city }) => {
+        const stubs = {
+            'paris': '18°C, partly cloudy',
+            'london': '12°C, rainy',
+            'new york': '22°C, sunny',
+            'tokyo': '25°C, clear',
+            'sydney': '20°C, windy',
+            'berlin': '15°C, overcast',
+            'dubai': '38°C, sunny',
+        };
+        return stubs[city.toLowerCase()] ?? '19°C, fair';
+    },
+});
+
 // ── Runtime init ──────────────────────────────────────────────────────────
 const { device } = await initRuntime();
 
 // ── HF token ──────────────────────────────────────────────────────────────
-window.onTokenInput = function(value) {
-    setHFToken(value);
-};
+window.onTokenInput = function(value) { setHFToken(value); };
 
 // ── State ─────────────────────────────────────────────────────────────────
-const pipes = {};            // loaded pipeline instances
-const chatHistory = [];      // [{ role, content }]
-const vlChatHistory = [];    // [{ role, content }]
-let vlImage = null;          // ImageData for VL model
+const pipes = {};
+const tgHistory    = [];
+const thinkHistory = [];
+const toolHistory  = [];
+let   toolSteps    = []; // tool call/result steps for current turn
 
-// ── Load model ───────────────────────────────────────────────────────────
+// ── Load model ────────────────────────────────────────────────────────────
+// tg / think / tool all share the same LFM2.5-1.2B model instance.
 window.loadModel = async function(id) {
     const btn = document.getElementById(`btn-${id}`);
     btn.disabled = true;
@@ -539,31 +694,28 @@ window.loadModel = async function(id) {
         if (id === 'cls') {
             pipes.cls = await pipeline('image-classification', {
                 model: 'Xenova/vit-base-patch16-224',
-                device,
-                quantized: true,
+                device, quantized: true,
             });
+            activateCard('cls');
         } else if (id === 'zs') {
             pipes.zs = await pipeline('zero-shot-image-classification', {
                 model: 'Xenova/clip-vit-base-patch32',
-                device,
-                quantized: true,
+                device, quantized: true,
             });
-        } else if (id === 'tg') {
-            pipes.tg = await pipeline('text-generation', {
-                model: 'LiquidAI/LFM2.5-1.2B-Instruct-ONNX',
-                device,
-                precision: 'q4',
-            });
-        } else if (id === 'vl') {
-            pipes.vl = await pipeline('image-text-to-text', {
-                model: 'LiquidAI/LFM2.5-VL-1.6B-ONNX',
-                device,
-                precision: 'q4',
-            });
+            activateCard('zs');
+        } else if (['tg', 'think', 'tool'].includes(id)) {
+            if (!pipes.tg) {
+                pipes.tg = await pipeline('text-generation', {
+                    model: 'LiquidAI/LFM2.5-1.2B-Instruct-ONNX',
+                    device, precision: 'q4',
+                });
+            }
+            // Activate all three text-mode cards together.
+            activateCard('tg');
+            activateCard('think');
+            activateCard('tool');
+            populateToolChips();
         }
-
-        document.getElementById(`card-${id}`).classList.add('loaded');
-        btn.innerHTML = `<span style="color:var(--accent)">●</span> Ready`;
     } catch (err) {
         btn.disabled = false;
         btn.textContent = 'Retry';
@@ -575,19 +727,29 @@ window.loadModel = async function(id) {
     }
 };
 
+function activateCard(id) {
+    document.getElementById(`card-${id}`).classList.add('loaded');
+    const btn = document.getElementById(`btn-${id}`);
+    btn.disabled = true;
+    btn.innerHTML = `<span style="color:var(--accent)">●</span> Ready`;
+}
+
+function populateToolChips() {
+    const chips = document.getElementById('tool-chips');
+    chips.innerHTML = navigator.modelContext.getTools()
+        .map(t => `<span class="tool-chip">${t.name}</span>`)
+        .join('');
+}
+
 // ── Image handling ────────────────────────────────────────────────────────
 window.onImageFile = async function(id, input) {
     const file = input.files[0];
     if (!file) return;
-
     const url = URL.createObjectURL(file);
     const previewEl = document.getElementById(`preview-${id}`);
     previewEl.src = url;
     previewEl.style.display = 'block';
-
-    // Decode image to ImageData (HWC float32)
     const imageData = await decodeImage(url);
-
     if (id === 'cls') await runClassification(imageData);
     if (id === 'zs')  await runZeroShot(imageData);
 };
@@ -603,7 +765,6 @@ async function decodeImage(url) {
             ctx.drawImage(img, 0, 0);
             const raw = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const w = canvas.width, h = canvas.height;
-            // RGBA → RGB float32 HWC
             const data = new Float32Array(w * h * 3);
             for (let i = 0; i < w * h; i++) {
                 data[i * 3]     = raw.data[i * 4];
@@ -618,28 +779,25 @@ async function decodeImage(url) {
 }
 
 async function runClassification(imageData) {
-    const resultsEl = document.getElementById('results-cls');
-    resultsEl.innerHTML = `<div class="status-msg"><span class="spinner"></span>&nbsp; Classifying…</div>`;
+    const el = document.getElementById('results-cls');
+    el.innerHTML = `<div class="status-msg"><span class="spinner"></span>&nbsp; Classifying…</div>`;
     try {
-        const results = await pipes.cls.run(imageData, 5);
-        renderBars(resultsEl, results);
+        renderBars(el, await pipes.cls.run(imageData, 5));
     } catch (err) {
-        resultsEl.innerHTML = `<p class="status-msg error">${err.message}</p>`;
+        el.innerHTML = `<p class="status-msg error">${escHtml(err instanceof Error ? err.message : String(err))}</p>`;
     }
 }
 
 async function runZeroShot(imageData) {
-    const labelsRaw = document.getElementById('labels-zs').value;
-    const labels = labelsRaw.split(',').map(l => l.trim()).filter(Boolean);
+    const labels = document.getElementById('labels-zs').value
+        .split(',').map(l => l.trim()).filter(Boolean);
     if (labels.length === 0) return;
-
-    const resultsEl = document.getElementById('results-zs');
-    resultsEl.innerHTML = `<div class="status-msg"><span class="spinner"></span>&nbsp; Classifying…</div>`;
+    const el = document.getElementById('results-zs');
+    el.innerHTML = `<div class="status-msg"><span class="spinner"></span>&nbsp; Classifying…</div>`;
     try {
-        const results = await pipes.zs.run(imageData, labels);
-        renderBars(resultsEl, results);
+        renderBars(el, await pipes.zs.run(imageData, labels));
     } catch (err) {
-        resultsEl.innerHTML = `<p class="status-msg error">${err.message}</p>`;
+        el.innerHTML = `<p class="status-msg error">${escHtml(err instanceof Error ? err.message : String(err))}</p>`;
     }
 }
 
@@ -648,7 +806,7 @@ function renderBars(container, results) {
     container.innerHTML = results.map(({ label, score }) => `
         <div class="result-item">
             <div class="result-label">
-                <span class="result-name">${label}</span>
+                <span class="result-name">${escHtml(label)}</span>
                 <span class="result-score">${(score * 100).toFixed(1)}%</span>
             </div>
             <div class="result-bar-bg">
@@ -658,17 +816,10 @@ function renderBars(container, results) {
     `).join('');
 }
 
-// ── Chat ──────────────────────────────────────────────────────────────────
-window.onChatKey = function(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendChat();
-    }
-};
-
-window.sendChat = async function() {
-    const input = document.getElementById('chat-input');
-    const sendBtn = document.getElementById('chat-send');
+// ── Text Generation ───────────────────────────────────────────────────────
+window.sendTG = async function() {
+    const input   = document.getElementById('tg-input');
+    const sendBtn = document.getElementById('tg-send');
     const text = input.value.trim();
     if (!text || !pipes.tg) return;
 
@@ -676,25 +827,25 @@ window.sendChat = async function() {
     input.disabled = true;
     sendBtn.disabled = true;
 
-    chatHistory.push({ role: 'user', content: text });
-    renderChat();
+    tgHistory.push({ role: 'user', content: text });
+    renderTG();
 
     try {
-        const reply = await pipes.tg.run([...chatHistory]);
-        chatHistory.push({ role: 'assistant', content: reply });
+        const reply = await pipes.tg.run([...tgHistory]);
+        tgHistory.push({ role: 'assistant', content: reply });
     } catch (err) {
-        chatHistory.push({ role: 'assistant', content: `Error: ${err.message}` });
+        tgHistory.push({ role: 'assistant', content: `Error: ${err instanceof Error ? err.message : String(err)}` });
     }
 
-    renderChat();
+    renderTG();
     input.disabled = false;
     sendBtn.disabled = false;
     input.focus();
 };
 
-function renderChat() {
-    const el = document.getElementById('chat-messages');
-    el.innerHTML = chatHistory.map(({ role, content }) => `
+function renderTG() {
+    const el = document.getElementById('tg-messages');
+    el.innerHTML = tgHistory.map(({ role, content }) => `
         <div class="chat-msg ${role}">
             <span class="chat-role">${role}</span>
             <div class="chat-bubble">${escHtml(content)}</div>
@@ -703,71 +854,166 @@ function renderChat() {
     el.scrollTop = el.scrollHeight;
 }
 
-function escHtml(s) {
-    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+// ── Thinking ──────────────────────────────────────────────────────────────
+const THINK_SYSTEM = 'Think step by step before answering. ' +
+    'Wrap your reasoning in <think>…</think> tags, then give your final answer.';
 
-// ── Vision Chat ───────────────────────────────────────────────────────────
-window.onVLImageFile = async function(input) {
-    const file = input.files[0];
-    if (!file) return;
-
-    const url = URL.createObjectURL(file);
-    const preview = document.getElementById('preview-vl');
-    preview.src = url;
-
-    const imageRow = document.getElementById('vl-image-row');
-    imageRow.style.display = 'block';
-
-    vlImage = await decodeImage(url);
-
-    // Reset conversation when image changes
-    vlChatHistory.length = 0;
-    renderVLChat();
-};
-
-window.onVLChatKey = function(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendVLChat();
-    }
-};
-
-window.sendVLChat = async function() {
-    const input = document.getElementById('vl-chat-input');
-    const sendBtn = document.getElementById('vl-chat-send');
+window.sendThink = async function() {
+    const input   = document.getElementById('think-input');
+    const sendBtn = document.getElementById('think-send');
     const text = input.value.trim();
-    if (!text || !pipes.vl || !vlImage) return;
+    if (!text || !pipes.tg) return;
 
     input.value = '';
     input.disabled = true;
     sendBtn.disabled = true;
 
-    vlChatHistory.push({ role: 'user', content: text });
-    renderVLChat();
+    thinkHistory.push({ role: 'user', content: text });
+    renderThink();
 
     try {
-        const reply = await pipes.vl.run([...vlChatHistory], vlImage);
-        vlChatHistory.push({ role: 'assistant', content: reply });
+        const messages = [{ role: 'system', content: THINK_SYSTEM }, ...thinkHistory];
+        const reply = await pipes.tg.run(messages, { maxNewTokens: 1024 });
+        thinkHistory.push({ role: 'assistant', content: reply });
     } catch (err) {
-        vlChatHistory.push({ role: 'assistant', content: `Error: ${err.message}` });
+        thinkHistory.push({ role: 'assistant', content: `Error: ${err instanceof Error ? err.message : String(err)}` });
     }
 
-    renderVLChat();
+    renderThink();
     input.disabled = false;
     sendBtn.disabled = false;
     input.focus();
 };
 
-function renderVLChat() {
-    const el = document.getElementById('vl-chat-messages');
-    el.innerHTML = vlChatHistory.map(({ role, content }) => `
-        <div class="chat-msg ${role}">
+function renderThink() {
+    const el = document.getElementById('think-messages');
+    el.innerHTML = thinkHistory.map(({ role, content }) => {
+        if (role === 'user') {
+            return `<div class="chat-msg user">
+                <span class="chat-role">user</span>
+                <div class="chat-bubble">${escHtml(content)}</div>
+            </div>`;
+        }
+        // Parse <think>…</think> from assistant response
+        const m = content.match(/^<think>([\s\S]*?)<\/think>\s*([\s\S]*)$/);
+        if (m) {
+            const thinking = m[1].trim();
+            const answer   = m[2].trim();
+            return `<details class="think-block">
+                <summary>Thinking…</summary>
+                <div class="think-block-content">${escHtml(thinking)}</div>
+            </details>
+            <div class="chat-msg assistant">
+                <span class="chat-role">assistant</span>
+                <div class="chat-bubble">${escHtml(answer)}</div>
+            </div>`;
+        }
+        return `<div class="chat-msg assistant">
+            <span class="chat-role">assistant</span>
+            <div class="chat-bubble">${escHtml(content)}</div>
+        </div>`;
+    }).join('');
+    el.scrollTop = el.scrollHeight;
+}
+
+// ── Tool Calling ──────────────────────────────────────────────────────────
+window.sendTool = async function() {
+    const input   = document.getElementById('tool-input');
+    const sendBtn = document.getElementById('tool-send');
+    const text = input.value.trim();
+    if (!text || !pipes.tg) return;
+
+    input.value = '';
+    input.disabled = true;
+    sendBtn.disabled = true;
+
+    toolHistory.push({ role: 'user', content: text });
+    toolSteps = [];
+    renderTool();
+
+    try {
+        const tools = navigator.modelContext.getTools();
+        let reply = await pipes.tg.run([...toolHistory], { tools, maxNewTokens: 256 });
+
+        const toolCall = extractToolCall(reply);
+        if (toolCall) {
+            const args = toolCall.arguments ?? toolCall.input ?? {};
+            toolSteps.push({ type: 'call', name: toolCall.name, args });
+            renderTool();
+
+            const result = await navigator.modelContext.execute(toolCall.name, args);
+            toolSteps.push({ type: 'result', name: toolCall.name, result });
+            renderTool();
+
+            // Feed result back and get final answer
+            const messagesWithResult = [
+                ...toolHistory,
+                { role: 'assistant', content: reply },
+                { role: 'user', content: `Tool result for ${toolCall.name}: ${result}` },
+            ];
+            reply = await pipes.tg.run(messagesWithResult, { maxNewTokens: 512 });
+        }
+
+        toolHistory.push({ role: 'assistant', content: reply });
+    } catch (err) {
+        toolHistory.push({ role: 'assistant', content: `Error: ${err instanceof Error ? err.message : String(err)}` });
+    }
+
+    renderTool();
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+};
+
+function extractToolCall(text) {
+    // Strip markdown code fence if present
+    const stripped = text.replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/, '$1').trim();
+    for (const candidate of [stripped, text.trim()]) {
+        try {
+            const obj = JSON.parse(candidate);
+            if (obj && typeof obj.name === 'string' &&
+                (obj.arguments !== undefined || obj.input !== undefined)) {
+                return obj;
+            }
+        } catch { /* not JSON */ }
+    }
+    return null;
+}
+
+function renderTool() {
+    const el = document.getElementById('tool-messages');
+    const rows = [];
+
+    for (let i = 0; i < toolHistory.length; i++) {
+        const { role, content } = toolHistory[i];
+        rows.push(`<div class="chat-msg ${role}">
             <span class="chat-role">${role}</span>
             <div class="chat-bubble">${escHtml(content)}</div>
-        </div>
-    `).join('');
+        </div>`);
+
+        // Inject tool steps after the last user message
+        if (role === 'user' && i === toolHistory.length - 1) {
+            for (const step of toolSteps) {
+                if (step.type === 'call') {
+                    rows.push(`<div class="tool-event call">
+                        <span class="tool-event-inner">→ ${escHtml(step.name)}(${escHtml(JSON.stringify(step.args))})</span>
+                    </div>`);
+                } else {
+                    rows.push(`<div class="tool-event result">
+                        <span class="tool-event-inner">← ${escHtml(step.result)}</span>
+                    </div>`);
+                }
+            }
+        }
+    }
+
+    el.innerHTML = rows.join('');
     el.scrollTop = el.scrollHeight;
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 // ── Drag-over styling ─────────────────────────────────────────────────────
@@ -780,9 +1026,7 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
         const file = e.dataTransfer.files[0];
         if (!file?.type.startsWith('image/')) return;
         const id = zone.id.replace('drop-', '');
-        const fakeInput = { files: [file] };
-        if (id === 'vl') onVLImageFile(fakeInput);
-        else onImageFile(id, fakeInput);
+        onImageFile(id, { files: [file] });
     });
 });
 </script>
