@@ -44,6 +44,12 @@ export interface ExternalDataFile {
     data: ArrayBuffer;
 }
 
+// ORT WebGPU EP only supports one session creation at a time. Serialize all
+// WebGPU session creations through this promise chain to prevent the
+// "another WebGPU EP inference session is being created" error that would
+// otherwise cause a spurious WASM fallback when multiple models load together.
+let _webgpuQueue: Promise<unknown> = Promise.resolve();
+
 export class ONNXSession {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private constructor(private readonly session: any, private readonly ort: any) {}
@@ -67,38 +73,47 @@ export class ONNXSession {
 
         const opts = externalData ? { externalData } : {};
 
-        // Try preferred EP first; if WebGPU session creation fails, fall back to
-        // WASM so the model can still run (slower, but beats a crash).
-        const candidates: string[][] = device === "webgpu" ? [["webgpu"], ["wasm"]] : [["wasm"]];
+        if (device === "webgpu") {
+            // Serialize WebGPU session creation: wait for any in-progress
+            // creation to finish, then run ours. If WebGPU truly fails (not
+            // just a concurrency race), fall back to WASM.
+            let release!: () => void;
+            const ticket = new Promise<void>(r => { release = r; });
+            const prev = _webgpuQueue;
+            _webgpuQueue = ticket;
 
-        let lastErr: unknown;
-        for (const eps of candidates) {
-            if (eps[0] === "wasm") ensureWasmPaths(ort);
             try {
+                await prev;
                 const session = await ort.InferenceSession.create(modelBuffer, {
-                    executionProviders: eps,
+                    executionProviders: ["webgpu"],
                     ...opts,
                 });
-                if (device === "webgpu" && eps[0] === "wasm") {
-                    console.warn("[transformers-js] WebGPU EP failed, fell back to WASM EP.");
-                }
                 return new ONNXSession(session, ort);
             } catch (err) {
-                lastErr = err;
-                if (eps !== candidates[candidates.length - 1]) {
-                    console.warn(`[transformers-js] ${eps[0]} EP failed (${err}), trying wasm…`);
-                }
+                console.warn(`[transformers-js] WebGPU EP failed (${err}), falling back to WASM.`);
+                // Fall through to WASM below.
+            } finally {
+                release();
             }
         }
 
-        // Convert raw WASM exception pointers to readable Errors.
-        if (typeof lastErr === "number") {
-            throw new Error(
-                `ORT session creation failed with native exception (code ${lastErr}). ` +
-                `Check the browser console above for ORT error details.`,
-            );
+        // WASM path (either device="wasm" or WebGPU fallback).
+        ensureWasmPaths(ort);
+        try {
+            const session = await ort.InferenceSession.create(modelBuffer, {
+                executionProviders: ["wasm"],
+                ...opts,
+            });
+            return new ONNXSession(session, ort);
+        } catch (err) {
+            if (typeof err === "number") {
+                throw new Error(
+                    `ORT session creation failed with native exception (code ${err}). ` +
+                    `Check the browser console for ORT error details.`,
+                );
+            }
+            throw err;
         }
-        throw lastErr;
     }
 
     async run(inputs: Record<string, TensorInput>): Promise<Record<string, TensorOutput>> {
