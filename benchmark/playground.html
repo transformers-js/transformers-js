@@ -556,32 +556,6 @@ main {
       </div>
     </div>
 
-    <!-- ── Chat 0.4B (gated) ── -->
-    <div class="card" id="card-md">
-      <div class="card-header">
-        <div class="card-meta">
-          <div class="card-row">
-            <span class="card-name">Chat</span>
-            <span class="tag">LFM2.5 0.4B</span>
-            <span class="tag tag-gated">🔒 gated</span>
-          </div>
-          <div class="card-desc">Requires an HF token — paste it in the header input, then accept the
-            <a href="https://huggingface.co/LiquidAI/LFM2.5-0.4B-Instruct-ONNX" target="_blank" rel="noopener"
-              style="color:inherit">model license ↗</a>.</div>
-        </div>
-        <span class="card-size">~400 MB</span>
-        <button class="btn" id="btn-md" onclick="loadModel('md')">Load</button>
-      </div>
-      <div class="card-demo" id="demo-md">
-        <div class="chat-messages" id="md-messages"></div>
-        <div class="chat-input-row">
-          <textarea class="chat-input" id="md-input" placeholder="Type a message…"
-            rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMD()}"></textarea>
-          <button class="btn btn-primary" id="md-send" onclick="sendMD()">Send</button>
-        </div>
-      </div>
-    </div>
-
     <!-- ── Text Generation ── -->
     <div class="card" id="card-tg">
       <div class="card-header">
@@ -611,11 +585,11 @@ main {
         <div class="card-meta">
           <div class="card-row">
             <span class="card-name">Thinking</span>
-            <span class="tag">LFM2.5 1.2B</span>
+            <span class="tag">LFM2.5 1.2B Thinking</span>
           </div>
-          <div class="card-desc">Same model, thinking mode — reasoning steps shown before the answer.</div>
+          <div class="card-desc">Dedicated reasoning model — shows its thinking steps before answering.</div>
         </div>
-        <span class="card-size">shared</span>
+        <span class="card-size">1.2 GB</span>
         <button class="btn" id="btn-think" onclick="loadModel('think')">Load</button>
       </div>
       <div class="card-demo" id="demo-think">
@@ -734,7 +708,6 @@ window.onTokenInput = function(value) { setHFToken(value); };
 // ── State ─────────────────────────────────────────────────────────────────
 const pipes = {};
 const smHistory    = [];
-const mdHistory    = [];
 const tgHistory    = [];
 const thinkHistory = [];
 const toolHistory  = [];
@@ -772,16 +745,23 @@ window.loadModel = async function(id) {
                 device, quantized: true,
             });
             activateCard('zs');
-        } else if (['tg', 'think', 'tool'].includes(id)) {
+        } else if (id === 'think') {
+            if (!pipes.think) {
+                pipes.think = await pipeline('text-generation', {
+                    model: 'LiquidAI/LFM2.5-1.2B-Thinking-ONNX',
+                    device, precision: 'q4',
+                });
+            }
+            activateCard('think');
+        } else if (['tg', 'tool'].includes(id)) {
             if (!pipes.tg) {
                 pipes.tg = await pipeline('text-generation', {
                     model: 'LiquidAI/LFM2.5-1.2B-Instruct-ONNX',
                     device, precision: 'q4',
                 });
             }
-            // Activate all three text-mode cards together.
+            // tg and tool share the same instruct model.
             activateCard('tg');
-            activateCard('think');
             activateCard('tool');
             populateToolChips();
         }
@@ -912,32 +892,6 @@ window.sendSM = async function() {
     input.focus();
 };
 
-// ── Chat 0.4B ────────────────────────────────────────────────────────────
-window.sendMD = async function() {
-    const input   = document.getElementById('md-input');
-    const sendBtn = document.getElementById('md-send');
-    const text = input.value.trim();
-    if (!text || !pipes.md) return;
-
-    input.value = '';
-    input.disabled = true;
-    sendBtn.disabled = true;
-
-    mdHistory.push({ role: 'user', content: text });
-    renderSimpleChat('md-messages', mdHistory);
-
-    try {
-        const reply = await pipes.md.run([...mdHistory]);
-        mdHistory.push({ role: 'assistant', content: reply });
-    } catch (err) {
-        mdHistory.push({ role: 'assistant', content: `Error: ${err instanceof Error ? err.message : String(err)}` });
-    }
-
-    renderSimpleChat('md-messages', mdHistory);
-    input.disabled = false;
-    sendBtn.disabled = false;
-    input.focus();
-};
 
 function renderSimpleChat(elId, history) {
     const el = document.getElementById(elId);
@@ -980,14 +934,11 @@ window.sendTG = async function() {
 function renderTG() { renderSimpleChat('tg-messages', tgHistory); }
 
 // ── Thinking ──────────────────────────────────────────────────────────────
-const THINK_SYSTEM = 'Think step by step before answering. ' +
-    'Wrap your reasoning in <think>…</think> tags, then give your final answer.';
-
 window.sendThink = async function() {
     const input   = document.getElementById('think-input');
     const sendBtn = document.getElementById('think-send');
     const text = input.value.trim();
-    if (!text || !pipes.tg) return;
+    if (!text || !pipes.think) return;
 
     input.value = '';
     input.disabled = true;
@@ -997,8 +948,7 @@ window.sendThink = async function() {
     renderThink();
 
     try {
-        const messages = [{ role: 'system', content: THINK_SYSTEM }, ...thinkHistory];
-        const reply = await pipes.tg.run(messages, { maxNewTokens: 1024 });
+        const reply = await pipes.think.run([...thinkHistory], { maxNewTokens: 1024 });
         thinkHistory.push({ role: 'assistant', content: reply });
     } catch (err) {
         thinkHistory.push({ role: 'assistant', content: `Error: ${err instanceof Error ? err.message : String(err)}` });
