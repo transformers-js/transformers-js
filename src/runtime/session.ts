@@ -104,7 +104,12 @@ export class ONNXSession {
     async run(inputs: Record<string, TensorInput>): Promise<Record<string, TensorOutput>> {
         const ort = this.ort;
         const feeds: Record<string, unknown> = {};
+        // Filter to inputs the model actually declares; some ONNX exports omit
+        // optional inputs (e.g. attention_mask in CLIP text models) and ORT
+        // errors on any key not in inputNames.
+        const validNames = new Set<string>(this.session.inputNames ?? []);
         for (const [name, { data, dims }] of Object.entries(inputs)) {
+            if (validNames.size > 0 && !validNames.has(name)) continue;
             const dtype = data instanceof BigInt64Array ? "int64" : "float32";
             feeds[name] = new ort.Tensor(dtype, data, dims);
         }
