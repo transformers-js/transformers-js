@@ -634,7 +634,8 @@ main {
 import { initRuntime, pipeline, setHFToken } from "./dist/playground.js";
 
 // ── WebMCP polyfill ────────────────────────────────────────────────────────
-if (!navigator.modelContext) {
+// Always install — browser / extension objects may exist but lack our API shape.
+{
     const _tools = new Map();
     navigator.modelContext = {
         registerTool({ name, description, input_schema, execute }) {
