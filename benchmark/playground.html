@@ -400,7 +400,7 @@ main {
   overflow-y: auto;
 }
 
-/* ── Tool events ── */
+/* ── Tool chips (available tools list) ── */
 .tool-chips {
   display: flex;
   flex-wrap: wrap;
@@ -416,27 +416,60 @@ main {
   color: var(--accent);
   border: 1px solid rgba(45,106,79,.3);
 }
-.tool-event {
-  align-self: center;
-  max-width: 90%;
+
+/* ── Tool call pills ── */
+.tool-pill {
+  align-self: flex-start;
+  margin: 4px 0;
 }
-.tool-event-inner {
+.tool-pill > summary {
   font-family: var(--mono);
-  font-size: 12px;
-  padding: 5px 10px;
-  border-radius: var(--r);
-  display: inline-block;
-  word-break: break-all;
-}
-.tool-event.call .tool-event-inner {
+  font-size: 11px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 20px;
   background: #e8f0f8;
   color: #1a4870;
   border: 1px solid #b8cce0;
+  cursor: pointer;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  user-select: none;
+  transition: border-radius .1s;
 }
-.tool-event.result .tool-event-inner {
-  background: #f0f8e8;
-  color: #2a5010;
-  border: 1px solid #b8d898;
+.tool-pill > summary::-webkit-details-marker { display: none; }
+.tool-pill[open] > summary {
+  border-radius: var(--r) var(--r) 0 0;
+}
+.tool-pill-body {
+  background: #f4f8fd;
+  border: 1px solid #b8cce0;
+  border-top: none;
+  border-radius: 0 var(--r) var(--r) var(--r);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 200px;
+  max-width: 480px;
+}
+.tool-pill-section { display: flex; flex-direction: column; gap: 2px; }
+.tool-pill-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: #6b8bb5;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.tool-pill-code {
+  font-family: var(--mono);
+  font-size: 11px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #1a3a60;
+  line-height: 1.5;
 }
 
 /* ── Loading spinner ── */
@@ -712,7 +745,7 @@ const smHistory    = [];
 const tgHistory    = [];
 const thinkHistory = [];
 const toolHistory  = [];
-let   toolSteps    = []; // tool call/result steps for current turn
+const toolCallLog  = new Map(); // userMsgIdx → [{type,name,args/result}]
 
 // ── Load model ────────────────────────────────────────────────────────────
 // tg / think / tool all share the same LFM2.5-1.2B model instance.
@@ -1003,8 +1036,9 @@ window.sendTool = async function() {
     input.disabled = true;
     sendBtn.disabled = true;
 
+    const userIdx = toolHistory.length;
     toolHistory.push({ role: 'user', content: text });
-    toolSteps = [];
+    toolCallLog.set(userIdx, []);
     renderTool();
 
     try {
@@ -1014,11 +1048,11 @@ window.sendTool = async function() {
         const toolCall = extractToolCall(reply);
         if (toolCall) {
             const args = toolCall.arguments ?? toolCall.input ?? {};
-            toolSteps.push({ type: 'call', name: toolCall.name, args });
+            toolCallLog.get(userIdx).push({ type: 'call', name: toolCall.name, args });
             renderTool();
 
             const result = await navigator.modelContext.execute(toolCall.name, args);
-            toolSteps.push({ type: 'result', name: toolCall.name, result });
+            toolCallLog.get(userIdx).push({ type: 'result', name: toolCall.name, result });
             renderTool();
 
             // Feed result back and get final answer
@@ -1065,6 +1099,28 @@ function extractToolCall(text) {
     return null;
 }
 
+function renderToolPill(call, result) {
+    const argsJson = Object.keys(call.args).length
+        ? escHtml(JSON.stringify(call.args, null, 2))
+        : '(no arguments)';
+    const resultHtml = result
+        ? escHtml(result.result)
+        : '<em style="color:#6b8bb5">pending…</em>';
+    return `<details class="tool-pill">
+        <summary>⚙ ${escHtml(call.name)}</summary>
+        <div class="tool-pill-body">
+            <div class="tool-pill-section">
+                <span class="tool-pill-label">arguments</span>
+                <pre class="tool-pill-code">${argsJson}</pre>
+            </div>
+            <div class="tool-pill-section">
+                <span class="tool-pill-label">result</span>
+                <pre class="tool-pill-code">${resultHtml}</pre>
+            </div>
+        </div>
+    </details>`;
+}
+
 function renderTool() {
     const el = document.getElementById('tool-messages');
     const rows = [];
@@ -1076,18 +1132,10 @@ function renderTool() {
             <div class="chat-bubble">${escHtml(content)}</div>
         </div>`);
 
-        // Inject tool steps after the last user message
-        if (role === 'user' && i === toolHistory.length - 1) {
-            for (const step of toolSteps) {
-                if (step.type === 'call') {
-                    rows.push(`<div class="tool-event call">
-                        <span class="tool-event-inner">→ ${escHtml(step.name)}(${escHtml(JSON.stringify(step.args))})</span>
-                    </div>`);
-                } else {
-                    rows.push(`<div class="tool-event result">
-                        <span class="tool-event-inner">← ${escHtml(step.result)}</span>
-                    </div>`);
-                }
+        if (role === 'user') {
+            const steps = toolCallLog.get(i) ?? [];
+            for (let j = 0; j < steps.length; j += 2) {
+                rows.push(renderToolPill(steps[j], steps[j + 1]));
             }
         }
     }
