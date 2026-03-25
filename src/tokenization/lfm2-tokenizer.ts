@@ -54,7 +54,8 @@ export class LFM2Tokenizer {
         }
 
         if (tools && tools.length > 0) {
-            const toolsStr = `List of tools: [${tools.map(t => JSON.stringify(t)).join(", ")}]`;
+            const toolList = tools.map(t => JSON.stringify(t)).join("\n");
+            const toolsStr = `You have access to the following tools:\n${toolList}\n\nTo call a tool, output exactly:\n<|tool_call_start|>[{"name": "tool_name", "arguments": {"key": "value"}}]<|tool_call_end|>`;
             systemPrompt = systemPrompt ? `${systemPrompt}\n${toolsStr}` : toolsStr;
         }
 

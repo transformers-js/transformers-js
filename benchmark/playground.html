@@ -1042,7 +1042,16 @@ window.sendTool = async function() {
 };
 
 function extractToolCall(text) {
-    // Strip markdown code fence if present
+    // LFM2 outputs <|tool_call_start|>[{"name":…,"arguments":…}]<|tool_call_end|>
+    const delimited = text.match(/<\|tool_call_start\|>([\s\S]*?)<\|tool_call_end\|>/);
+    if (delimited) {
+        try {
+            const parsed = JSON.parse(delimited[1].trim());
+            const obj = Array.isArray(parsed) ? parsed[0] : parsed;
+            if (obj && typeof obj.name === 'string') return obj;
+        } catch { /* malformed */ }
+    }
+    // Fallback: strip markdown code fence and try raw JSON
     const stripped = text.replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/, '$1').trim();
     for (const candidate of [stripped, text.trim()]) {
         try {
