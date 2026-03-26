@@ -98,17 +98,13 @@ export async function generate(
     const prefillOut = await session.run(prefillInputs);
     updateCache(cache, prefillOut);
 
-    // When num_logits_to_keep=1, the model only emits logits for the last
-    // position, so dims[1]=1 and we read directly. Otherwise slice the last row.
     const vocabSize = prefillOut["logits"]!.dims[2]!;
-    const prefillLogitOffset = hasNumLogitsToKeep
-        ? 0
-        : (seqLen - 1) * vocabSize * 4;
-    const lastLogits = new Float32Array(
-        (prefillOut["logits"]!.data as Float32Array).buffer,
-        prefillLogitOffset,
-        vocabSize,
-    );
+    // With num_logits_to_keep=1 the model emits exactly one position [1,1,V];
+    // use the data directly. Otherwise slice to the last row of [1,seqLen,V].
+    const logitsData = prefillOut["logits"]!.data as Float32Array;
+    const lastLogits = hasNumLogitsToKeep
+        ? logitsData
+        : logitsData.subarray((seqLen - 1) * vocabSize, seqLen * vocabSize);
     let nextToken = sampling ? sampleTopP(lastLogits, sampling) : argmax(lastLogits);
     generated.push(nextToken);
 
