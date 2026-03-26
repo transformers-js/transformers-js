@@ -44,7 +44,7 @@ const TOKENIZER_CONFIG = {
 
 function makeTokenizer(): CLIPTokenizer {
     const tok = new Tokenizer(TOKENIZER_JSON, TOKENIZER_CONFIG);
-    return new (CLIPTokenizer as any)(tok);
+    return CLIPTokenizer.fromTokenizer(tok);
 }
 
 describe("CLIPTokenizer.encode", () => {

@@ -37,7 +37,8 @@ export class ImageClassificationPipeline {
 // ── Math utils ─────────────────────────────────────────────────────────────
 
 export function softmax(logits: Float32Array): Float32Array {
-    const max = Math.max(...logits);
+    let max = -Infinity;
+    for (let i = 0; i < logits.length; i++) if (logits[i]! > max) max = logits[i]!;
     const exps = logits.map((v) => Math.exp(v - max));
     const sum = exps.reduce((a, b) => a + b, 0);
     return new Float32Array(exps.map((v) => v / sum));

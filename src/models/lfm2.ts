@@ -73,8 +73,7 @@ export class LFM2ForCausalLM {
         const externalData = [{ path: dataFile.split("/").pop()!, data: dataBuffer }];
         const session = await ONNXSession.load(modelBuffer, device, externalData);
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const inputNames: string[] = (session as any).session.inputNames ?? [];
+        const inputNames: string[] = session.inputNames;
         const hasPositionIds = inputNames.includes("position_ids");
 
         return new LFM2ForCausalLM(session, tokenizer, config, config.eos_token_id, hasPositionIds, inputNames);
@@ -95,7 +94,6 @@ export class LFM2ForCausalLM {
             this.hasPositionIds,
             this.inputNames,
         );
-        console.debug("[tfjs] generatedIds:", generatedIds, "eosTokenId:", this.eosTokenId);
         return this.tokenizer.decode(generatedIds);
     }
 

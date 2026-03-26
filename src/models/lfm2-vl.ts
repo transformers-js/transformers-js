@@ -89,8 +89,7 @@ export class LFM2VLForConditionalGeneration {
             ]),
         ]);
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const decInputNames: string[] = (decoderSession as any).session.inputNames ?? [];
+        const decInputNames: string[] = decoderSession.inputNames;
         const hasPositionIds = decInputNames.includes("position_ids");
 
         const textCfg = config.text_config;
@@ -159,6 +158,8 @@ export class LFM2VLForConditionalGeneration {
         const cache = initCache(this.decoderInputNames, this.modelCfg);
         const attnMask = new BigInt64Array(prefillSeqLen).fill(1n);
 
+        const hasNumLogitsToKeep = this.decoderInputNames.includes("num_logits_to_keep");
+
         const prefillInputs: Record<string, import("../runtime/session.js").TensorInput> = {
             inputs_embeds: { data: prefillEmbeds, dims: [1, prefillSeqLen, this.hiddenSize] },
             attention_mask: { data: attnMask, dims: [1, prefillSeqLen] },
@@ -170,16 +171,17 @@ export class LFM2VLForConditionalGeneration {
                 dims: [1, prefillSeqLen],
             };
         }
+        if (hasNumLogitsToKeep) {
+            prefillInputs["num_logits_to_keep"] = { data: new BigInt64Array([1n]), dims: [1] };
+        }
 
         const prefillOut = await this.decoder.run(prefillInputs);
         updateCache(cache, prefillOut);
 
-        const vocabSize = prefillOut["logits"]!.dims[2]!;
-        const lastLogits = new Float32Array(
-            (prefillOut["logits"]!.data as Float32Array).buffer,
-            (prefillSeqLen - 1) * vocabSize * 4,
-            vocabSize,
-        );
+        const logitsDims = prefillOut["logits"]!.dims;
+        const vocabSize = logitsDims[logitsDims.length - 1]!;
+        const logitsData = prefillOut["logits"]!.data as Float32Array;
+        const lastLogits = logitsData.subarray(logitsData.length - vocabSize);
         let nextToken = sampling ? sampleTopP(lastLogits, sampling) : argmax(lastLogits);
         const generated: number[] = [nextToken];
 

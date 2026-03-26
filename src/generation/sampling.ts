@@ -27,7 +27,8 @@ export function sampleTopP(logits: Float32Array, opts: SamplingOptions = {}): nu
     const scaled = temperature === 1.0 ? logits : logits.map((v) => v / temperature);
 
     // Softmax
-    const max = Math.max(...scaled);
+    let max = -Infinity;
+    for (let i = 0; i < scaled.length; i++) if (scaled[i]! > max) max = scaled[i]!;
     const exps = scaled.map((v) => Math.exp(v - max));
     const sum = exps.reduce((a, b) => a + b, 0);
     const probs = exps.map((v) => v / sum);

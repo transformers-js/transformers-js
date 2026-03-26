@@ -132,7 +132,7 @@ export class CLIPImageProcessor implements ImageProcessor {
         this.image_std = config.image_std ?? OPENAI_CLIP_STD;
     }
 
-    preprocess(image: ImageData, config: Partial<CLIPImageProcessorConfig> = {}): Float32Array {
+    async preprocess(image: ImageData, config: Partial<CLIPImageProcessorConfig> = {}): Promise<Float32Array> {
         const do_resize = config.do_resize ?? this.do_resize;
         const size = config.size ?? this.size;
         const do_center_crop = config.do_center_crop ?? this.do_center_crop;
@@ -144,7 +144,7 @@ export class CLIPImageProcessor implements ImageProcessor {
         const image_std = config.image_std ?? this.image_std;
 
         let img = image;
-        if (do_resize) img = resize(img, size, this.resample);
+        if (do_resize) img = await resize(img, size, this.resample);
         if (do_center_crop) img = centerCrop(img, crop_size);
         if (do_rescale) img = rescale(img, rescale_factor);
         if (do_normalize) img = normalize(img, image_mean, image_std);

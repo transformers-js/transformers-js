@@ -1,14 +1,16 @@
 import { fetchJSON } from "../runtime/hub.js";
 import { resize, rescale, normalize, hwcToChw, centerCrop } from "./ops.js";
 import type { ImageData, ResampleFilter } from "./ops.js";
+import type { ImageProcessor as IImageProcessor } from "./base.js";
 
 // Mirrors the shape of preprocessor_config.json on the HF Hub.
 // PIL resample integers: 0=NEAREST, 2=BILINEAR, 3=BICUBIC, 1=LANCZOS
+// Lanczos maps to bicubic — not yet implemented; same approximation used in benchmark.
 const PIL_RESAMPLE: Record<number, ResampleFilter> = {
     0: "nearest",
     2: "bilinear",
     3: "bicubic",
-    1: "lanczos",
+    1: "bicubic",
 };
 
 interface RawPreprocessorConfig {
@@ -61,7 +63,7 @@ function fromRaw(raw: RawPreprocessorConfig): ProcessorConfig {
     };
 }
 
-export class ImageProcessor {
+export class ImageProcessor implements IImageProcessor {
     constructor(readonly config: ProcessorConfig) {}
 
     static async fromHub(modelId: string): Promise<ImageProcessor> {
@@ -83,11 +85,6 @@ export class ImageProcessor {
         if (cfg.do_rescale)     img = rescale(img, cfg.rescale_factor);
         if (cfg.do_normalize)   img = normalize(img, cfg.image_mean, cfg.image_std);
 
-        const chw = hwcToChw(img);
-
-        // Add batch dimension
-        const batched = new Float32Array(chw.length);
-        batched.set(chw);
-        return batched;
+        return hwcToChw(img);
     }
 }

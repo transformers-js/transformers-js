@@ -180,9 +180,7 @@ export function makeWebGPUResize(device: GPUDevice) {
         filter: ResampleFilter = "bilinear",
     ): Promise<ImageData> {
         if (filter === "bilinear") return gpuDispatch(bilinearPipeline, image, size);
-        // Bicubic and lanczos both use the GPU bicubic shader (Keys a=-0.5).
-        // Lanczos is approximated as bicubic — same as the CPU fallback.
-        if (filter === "bicubic" || filter === "lanczos") return gpuDispatch(bicubicPipeline, image, size);
+        if (filter === "bicubic") return gpuDispatch(bicubicPipeline, image, size);
         // Nearest: fast enough on CPU, not worth a GPU round-trip for most images.
         const { cpuResize } = await import("./cpu.js");
         return cpuResize(image, size, filter);

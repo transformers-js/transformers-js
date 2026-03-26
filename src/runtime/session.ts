@@ -54,6 +54,10 @@ export class ONNXSession {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private constructor(private readonly session: any, private readonly ort: any) {}
 
+    get inputNames(): string[] {
+        return this.session.inputNames ?? [];
+    }
+
     static async load(
         modelBuffer: ArrayBuffer,
         device: Device,

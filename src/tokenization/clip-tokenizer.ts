@@ -12,6 +12,10 @@ export interface TokenizerOutput {
 export class CLIPTokenizer {
     private constructor(private readonly tokenizer: Tokenizer) {}
 
+    static fromTokenizer(tokenizer: Tokenizer): CLIPTokenizer {
+        return new CLIPTokenizer(tokenizer);
+    }
+
     static async fromHub(modelId: string): Promise<CLIPTokenizer> {
         const [tokenizerJson, tokenizerConfig] = await Promise.all([
             fetchJSON<object>(modelId, "tokenizer.json"),

@@ -8,7 +8,7 @@ export interface ImageData {
     channels: number; // 1 (grayscale) | 3 (RGB) | 4 (RGBA)
 }
 
-export type ResampleFilter = "nearest" | "bilinear" | "bicubic" | "lanczos";
+export type ResampleFilter = "nearest" | "bilinear" | "bicubic";
 
 /** Multiply every pixel by a scalar. Equivalent to numpy: arr * factor */
 export function rescale(image: ImageData, factor: number): ImageData {

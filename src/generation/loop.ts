@@ -106,7 +106,6 @@ export async function generate(
     const logitsData = prefillOut["logits"]!.data as Float32Array;
     const lastLogits = logitsData.subarray(logitsData.length - vocabSize);
     let nextToken = sampling ? sampleTopP(lastLogits, sampling) : argmax(lastLogits);
-    console.debug("[tfjs] prefill logits dims:", logitsDims, "vocabSize:", vocabSize, "firstToken:", nextToken, "eosTokenId:", eosTokenId);
     generated.push(nextToken);
 
     // ── Decode loop ────────────────────────────────────────────────────────

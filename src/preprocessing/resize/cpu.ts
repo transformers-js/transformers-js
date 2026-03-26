@@ -138,6 +138,5 @@ export async function cpuResize(
         case "nearest":  return nearest(image, size);
         case "bilinear": return bilinear(image, size);
         case "bicubic":  return bicubic(image, size);
-        case "lanczos":  return bicubic(image, size); // lanczos deferred; bicubic is close
     }
 }

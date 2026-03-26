@@ -1,7 +1,7 @@
 import type { ImageData } from "./ops.js";
 
 export interface ImageProcessor {
-    preprocess(image: ImageData, config?: Record<string, unknown>): Promise<Float32Array>;
+    preprocess(image: ImageData, config?: object): Promise<Float32Array>;
 }
 
 export interface FeatureExtractor {
