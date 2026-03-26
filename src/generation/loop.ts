@@ -98,13 +98,13 @@ export async function generate(
     const prefillOut = await session.run(prefillInputs);
     updateCache(cache, prefillOut);
 
-    const vocabSize = prefillOut["logits"]!.dims[2]!;
-    // With num_logits_to_keep=1 the model emits exactly one position [1,1,V];
-    // use the data directly. Otherwise slice to the last row of [1,seqLen,V].
+    const logitsDims = prefillOut["logits"]!.dims;
+    // vocab size is always the last dimension regardless of output shape.
+    const vocabSize = logitsDims[logitsDims.length - 1]!;
+    // Always slice the last vocabSize elements: works for [1,seqLen,V],
+    // [1,1,V] (when num_logits_to_keep=1), and [1,V] (2-D exports).
     const logitsData = prefillOut["logits"]!.data as Float32Array;
-    const lastLogits = hasNumLogitsToKeep
-        ? logitsData
-        : logitsData.subarray((seqLen - 1) * vocabSize, seqLen * vocabSize);
+    const lastLogits = logitsData.subarray(logitsData.length - vocabSize);
     let nextToken = sampling ? sampleTopP(lastLogits, sampling) : argmax(lastLogits);
     generated.push(nextToken);
 
