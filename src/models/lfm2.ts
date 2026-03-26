@@ -95,6 +95,7 @@ export class LFM2ForCausalLM {
             this.hasPositionIds,
             this.inputNames,
         );
+        console.debug("[tfjs] generatedIds:", generatedIds, "eosTokenId:", this.eosTokenId);
         return this.tokenizer.decode(generatedIds);
     }
 
