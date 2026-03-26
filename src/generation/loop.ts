@@ -80,6 +80,8 @@ export async function generate(
     const inputIds = new BigInt64Array(promptIds.map(BigInt));
     const attentionMask = new BigInt64Array(seqLen).fill(1n);
 
+    const hasNumLogitsToKeep = inputNames.includes("num_logits_to_keep");
+
     const prefillInputs: Record<string, TensorInput> = {
         input_ids: { data: inputIds, dims: [1, seqLen] },
         attention_mask: { data: attentionMask, dims: [1, seqLen] },
@@ -89,15 +91,22 @@ export async function generate(
         const posIds = new BigInt64Array(seqLen).map((_, i) => BigInt(i));
         prefillInputs["position_ids"] = { data: posIds, dims: [1, seqLen] };
     }
+    if (hasNumLogitsToKeep) {
+        prefillInputs["num_logits_to_keep"] = { data: new BigInt64Array([1n]), dims: [1] };
+    }
 
     const prefillOut = await session.run(prefillInputs);
     updateCache(cache, prefillOut);
 
-    // Pick first token from the last position of prefill logits
+    // When num_logits_to_keep=1, the model only emits logits for the last
+    // position, so dims[1]=1 and we read directly. Otherwise slice the last row.
     const vocabSize = prefillOut["logits"]!.dims[2]!;
+    const prefillLogitOffset = hasNumLogitsToKeep
+        ? 0
+        : (seqLen - 1) * vocabSize * 4;
     const lastLogits = new Float32Array(
         (prefillOut["logits"]!.data as Float32Array).buffer,
-        (seqLen - 1) * vocabSize * 4,
+        prefillLogitOffset,
         vocabSize,
     );
     let nextToken = sampling ? sampleTopP(lastLogits, sampling) : argmax(lastLogits);
@@ -117,6 +126,9 @@ export async function generate(
                 data: new BigInt64Array([BigInt(pastLen)]),
                 dims: [1, 1],
             };
+        }
+        if (hasNumLogitsToKeep) {
+            decodeInputs["num_logits_to_keep"] = { data: new BigInt64Array([1n]), dims: [1] };
         }
 
         const out = await session.run(decodeInputs);
