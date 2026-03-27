@@ -246,19 +246,24 @@ async function run(modelId, precision, mirrorBaseUrl, image) {
     // ── Warmup ───────────────────────────────────────────────────────────────
     log(`\nWarmup (${WARMUP} generation × ${DECODE_TOKENS} tokens)...`, "dim");
     for (let i = 0; i < WARMUP; i++) {
-        await model.chat(PROMPT, image, { maxNewTokens: DECODE_TOKENS });
+        const timing = {};
+        await model.chat(PROMPT, image, { maxNewTokens: DECODE_TOKENS, timing });
         log(`  warmup ${i + 1}/${WARMUP}`, "dim");
+        log(`    preprocess ${timing.preprocessMs?.toFixed(0)} ms | vision_encoder ${timing.visionEncoderMs?.toFixed(0)} ms | embed_tokens ${timing.embedTokensMs?.toFixed(0)} ms | decoder_prefill ${timing.decoderPrefillMs?.toFixed(0)} ms | first_decode ${timing.firstDecodeMs?.toFixed(0)} ms`, "dim");
     }
 
     // ── Phase 1: TTFT ────────────────────────────────────────────────────────
     // maxNewTokens=1 → full preprocessing + all 3 ONNX sessions + 1 decode step
     log(`\nPhase 1 — time to first token (${RUNS} runs)...`, "dim");
     const ttftTimes = [];
+    const phaseTimings = [];
     for (let i = 0; i < RUNS; i++) {
+        const timing = {};
         const t = performance.now();
-        await model.chat(PROMPT, image, { maxNewTokens: 1 });
+        await model.chat(PROMPT, image, { maxNewTokens: 1, timing });
         ttftTimes.push(performance.now() - t);
-        log(`  run ${String(i + 1).padStart(2)}/${RUNS}  ${ttftTimes.at(-1).toFixed(1)} ms`, "dim");
+        phaseTimings.push(timing);
+        log(`  run ${String(i + 1).padStart(2)}/${RUNS}  ${ttftTimes.at(-1).toFixed(1)} ms  [pre:${timing.preprocessMs?.toFixed(0)} vis:${timing.visionEncoderMs?.toFixed(0)} tok:${timing.embedTokensMs?.toFixed(0)} pfx:${timing.decoderPrefillMs?.toFixed(0)} dec:${timing.firstDecodeMs?.toFixed(0)}]`, "dim");
     }
 
     // ── Phase 2: Decode throughput ───────────────────────────────────────────
@@ -288,6 +293,17 @@ async function run(modelId, precision, mirrorBaseUrl, image) {
     log(`Image:      ${image.width}×${image.height}`);
     log(`Prompt:     "${PROMPT[0].content}"`);
     log(`New tokens: ${DECODE_TOKENS}`);
+    log("");
+    const phaseMedian = (key) => {
+        const vals = phaseTimings.map(t => t[key] ?? 0).sort((a, b) => a - b);
+        return vals[Math.floor(vals.length / 2)];
+    };
+    log(`Phase breakdown (median)`);
+    log(`  preprocess:     ${phaseMedian("preprocessMs").toFixed(0)} ms`);
+    log(`  vision_encoder: ${phaseMedian("visionEncoderMs").toFixed(0)} ms`);
+    log(`  embed_tokens:   ${phaseMedian("embedTokensMs").toFixed(0)} ms`);
+    log(`  decoder_prefill:${phaseMedian("decoderPrefillMs").toFixed(0)} ms`);
+    log(`  first_decode:   ${phaseMedian("firstDecodeMs").toFixed(0)} ms`);
     log("");
     log(`Time to first token  (preprocessing + 3 sessions + first decode)`);
     const ttftSuffix = criterion ? `  ${ttftPass ? "✓" : "✗"}  bound ≤${criterion.ttft} ms` : "";

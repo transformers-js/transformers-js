@@ -23,9 +23,19 @@ export interface LFM2VLOptions {
     mirrorBaseUrl?: string;
 }
 
+export interface VLPhaseTiming {
+    preprocessMs: number;
+    visionEncoderMs: number;
+    embedTokensMs: number;
+    decoderPrefillMs: number;
+    firstDecodeMs: number;
+}
+
 export interface VLGenerateOptions {
     maxNewTokens?: number;
     sampling?: SamplingOptions;
+    /** If provided, filled with per-phase latency breakdowns. */
+    timing?: VLPhaseTiming;
 }
 
 interface VLConfig {
@@ -118,10 +128,13 @@ export class LFM2VLForConditionalGeneration {
         options: VLGenerateOptions = {},
     ): Promise<string> {
         const { maxNewTokens = 512, sampling } = options;
+        const t = (options.timing != null) ? performance.now : null;
 
         // ── 1. Image preprocessing ─────────────────────────────────────────
+        const t0 = t?.();
         const { pixelValues, pixelAttentionMask, spatialShapes, numTiles } =
             await preprocessVLImage(image, this.maxTiles, this.useThumbnail);
+        const t1 = t?.();
 
         // NaFlex patch format: [num_tiles, max_patches, patch_dim]
         // max_patches = 32×32 = 1024, patch_dim = 16×16×3 = 768
@@ -134,6 +147,7 @@ export class LFM2VLForConditionalGeneration {
         // image_features: [num_tiles, tokens_per_tile, hidden_size] → flatten
         const imageFeatures = imgOut["image_features"]!.data as Float32Array;
         const imgEmbedTokens = imageFeatures.length / this.hiddenSize;
+        const t2 = t?.();
 
         // ── 2. Tokenize with image placeholder ─────────────────────────────
         // Inject <image> before the first user message content.
@@ -146,6 +160,7 @@ export class LFM2VLForConditionalGeneration {
             input_ids: { data: inputIds, dims: [1, promptIds.length] },
         });
         const tokenEmbeds = tokOut["inputs_embeds"]!.data as Float32Array;
+        const t3 = t?.();
 
         // ── 4. Splice image embeddings at image_token positions ────────────
         // Each image_token_id placeholder expands to imgEmbedTokens embedding rows.
@@ -189,6 +204,7 @@ export class LFM2VLForConditionalGeneration {
         const lastLogits = logitsData.subarray(logitsData.length - vocabSize);
         let nextToken = sampling ? sampleTopP(lastLogits, sampling) : argmax(lastLogits);
         const generated: number[] = [nextToken];
+        const t4 = t?.();
 
         // ── 6. Decode loop ─────────────────────────────────────────────────
         let pastLen = prefillSeqLen;
@@ -224,6 +240,16 @@ export class LFM2VLForConditionalGeneration {
         }
 
         if (generated[generated.length - 1] === this.eosTokenId) generated.pop();
+
+        if (options.timing != null && t0 != null && t1 != null && t2 != null && t3 != null && t4 != null) {
+            const t5 = performance.now();
+            options.timing.preprocessMs      = t1 - t0;
+            options.timing.visionEncoderMs   = t2 - t1;
+            options.timing.embedTokensMs     = t3 - t2;
+            options.timing.decoderPrefillMs  = t4 - t3;
+            options.timing.firstDecodeMs     = t5 - t4;
+        }
+
         return this.tokenizer.decode(generated);
     }
 
