@@ -62,6 +62,9 @@ export function updateCache(
 
 /**
  * Autoregressive generation loop for LFM2-style ONNX models.
+ *
+ * @param onToken - Called with each generated token id as it is produced,
+ *                  including the first token from prefill. Enables streaming.
  */
 export async function generate(
     session: ONNXSession,
@@ -70,6 +73,7 @@ export async function generate(
     genCfg: GenerationConfig,
     hasPositionIds: boolean,
     inputNames: string[],
+    onToken?: (tokenId: number) => void,
 ): Promise<number[]> {
     const { eosTokenId, maxNewTokens = 512, sampling } = genCfg;
     const generated: number[] = [];
@@ -107,6 +111,7 @@ export async function generate(
     const lastLogits = logitsData.subarray(logitsData.length - vocabSize);
     let nextToken = sampling ? sampleTopP(lastLogits, sampling) : argmax(lastLogits);
     generated.push(nextToken);
+    onToken?.(nextToken);
 
     // ── Decode loop ────────────────────────────────────────────────────────
     let pastLen = seqLen;
@@ -134,6 +139,7 @@ export async function generate(
         const logits = out["logits"]!.data as Float32Array;
         nextToken = sampling ? sampleTopP(logits, sampling) : argmax(logits);
         generated.push(nextToken);
+        onToken?.(nextToken);
     }
 
     // Strip trailing EOS if present

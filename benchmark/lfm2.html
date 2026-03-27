@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>transformers-js · LFM2 latency benchmark</title>
+<style>
+  body { font-family: monospace; max-width: 680px; margin: 40px auto; padding: 0 16px; background: #0d1117; color: #e6edf3; }
+  h1 { font-size: 1rem; color: #58a6ff; margin: 0 0 24px; }
+  #log { white-space: pre; line-height: 1.6; font-size: 0.85rem; }
+  .pass { color: #3fb950; }
+  .fail { color: #f85149; }
+  .dim  { color: #8b949e; }
+  .bold { font-weight: bold; }
+  #config { margin-bottom: 24px; display: flex; flex-direction: column; gap: 8px; }
+  #config label { font-size: 0.8rem; color: #8b949e; }
+  #config input, #config select {
+    background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+    font-family: monospace; font-size: 0.85rem; padding: 4px 8px; border-radius: 4px; width: 100%;
+  }
+  button {
+    margin-top: 8px; padding: 6px 16px; background: #238636; border: none;
+    color: #fff; font-family: monospace; font-size: 0.85rem; border-radius: 4px; cursor: pointer;
+  }
+  button:hover { background: #2ea043; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "onnxruntime-web": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/ort.webgpu.bundle.min.mjs"
+  }
+}
+</script>
+</head>
+<body>
+<h1>transformers-js · LFM2 latency benchmark</h1>
+
+<div id="config">
+  <label>Model ID (HF Hub)
+    <input id="modelId" value="onnx-community/LFM2-350M-ONNX" />
+  </label>
+  <label>Precision
+    <select id="precision">
+      <option value="q4" selected>q4 (~recommended for browser)</option>
+      <option value="q8">q8</option>
+      <option value="fp16">fp16</option>
+    </select>
+  </label>
+  <label>HF token (required for gated models)
+    <input id="hfToken" type="password" placeholder="hf_..." />
+  </label>
+  <label>Local mirror URL (optional — overrides HF Hub fetch)
+    <input id="mirrorUrl" placeholder="e.g. http://localhost:8001" />
+  </label>
+  <button id="runBtn">Run benchmark</button>
+</div>
+
+<div id="log"></div>
+
+<script type="module">
+import { initRuntime, LFM2ForCausalLM, setHFToken } from "./dist/lfm2.js";
+
+// Fixed prompt — short, deterministic, generates a brief predictable answer.
+const PROMPT = [{ role: "user", content: "What is the capital of France?" }];
+
+// Warmup full generations (discarded). Enough to warm up the GPU pipeline.
+const WARMUP = 2;
+// Measured runs for each phase.
+const RUNS = 8;
+// Decode tokens per run (after first token). Higher = more stable decode estimate.
+const DECODE_TOKENS = 40;
+
+// Per-model bounds (M-series Mac, Chrome, WebGPU). No criterion shown if model not recognised.
+const CRITERIA = {
+    "onnx-community/LFM2-350M-ONNX":          { ttft:  27, decode: 16 },
+    "LiquidAI/LFM2.5-0.4B-Instruct-ONNX":    { ttft:  35, decode: 10 },
+    "LiquidAI/LFM2.5-1.2B-Instruct-ONNX":    { ttft:  50, decode:  5 },
+    "LiquidAI/LFM2.5-1.2B-Thinking-ONNX":    { ttft:  50, decode:  5 },
+    "onnx-community/LFM2-2.6B-ONNX":          { ttft: 110, decode: 10 },
+};
+
+const el = document.getElementById("log");
+function log(msg, cls = "") {
+    el.innerHTML += `<span class="${cls}">${msg}</span>\n`;
+}
+function hr() { log("─────────────────────────────────────────"); }
+
+function percentile(sorted, p) {
+    const idx = Math.floor(p / 100 * sorted.length);
+    return sorted[Math.min(idx, sorted.length - 1)];
+}
+
+function stats(times) {
+    const s = [...times].sort((a, b) => a - b);
+    return {
+        median: percentile(s, 50),
+        p95:    percentile(s, 95),
+        min:    s[0],
+        max:    s[s.length - 1],
+    };
+}
+
+document.getElementById("runBtn").addEventListener("click", async () => {
+    el.innerHTML = "";
+    document.getElementById("runBtn").disabled = true;
+
+    const modelId   = document.getElementById("modelId").value.trim();
+    const precision = document.getElementById("precision").value;
+    const hfToken   = document.getElementById("hfToken").value.trim();
+    const mirrorUrl = document.getElementById("mirrorUrl").value.trim() || undefined;
+
+    if (hfToken) setHFToken(hfToken);
+
+    try {
+        await run(modelId, precision, mirrorUrl);
+    } catch (err) {
+        log(`\nError: ${err.message}`, "fail");
+        console.error(err);
+    } finally {
+        document.getElementById("runBtn").disabled = false;
+    }
+});
+
+async function run(modelId, precision, mirrorBaseUrl) {
+    const criterion = CRITERIA[modelId] ?? null;
+    log("Initializing runtime...", "dim");
+    const { device } = await initRuntime("webgpu");
+    log(`  device: ${device}`, device === "webgpu" ? "pass" : "fail");
+    if (device !== "webgpu") {
+        log("  Warning: WebGPU unavailable — results reflect WASM fallback, not the target path.", "fail");
+    }
+
+    log(`\nLoading ${modelId} (${precision})...`, "dim");
+    log("  First run downloads the model (~1–4 GB depending on precision).", "dim");
+    const t0 = performance.now();
+    const model = await LFM2ForCausalLM.fromHub(modelId, { device, precision, mirrorBaseUrl });
+    log(`  loaded in ${((performance.now() - t0) / 1000).toFixed(1)} s`, "dim");
+
+    // ── Warmup ──────────────────────────────────────────────────────────────
+    log(`\nWarmup (${WARMUP} generations × ${DECODE_TOKENS} tokens)...`, "dim");
+    for (let i = 0; i < WARMUP; i++) {
+        await model.chat(PROMPT, { maxNewTokens: DECODE_TOKENS });
+        log(`  warmup ${i + 1}/${WARMUP}`, "dim");
+    }
+
+    // ── Phase 1: TTFT ───────────────────────────────────────────────────────
+    // maxNewTokens=1 → prefill + exactly 1 decode step.
+    log(`\nPhase 1 — time to first token (${RUNS} runs)...`, "dim");
+    const ttftTimes = [];
+    for (let i = 0; i < RUNS; i++) {
+        const t = performance.now();
+        await model.chat(PROMPT, { maxNewTokens: 1 });
+        ttftTimes.push(performance.now() - t);
+        log(`  run ${String(i + 1).padStart(2)}/${RUNS}  ${ttftTimes.at(-1).toFixed(1)} ms`, "dim");
+    }
+
+    // ── Phase 2: Decode throughput ───────────────────────────────────────────
+    // Full generation. Avg decode per token = (total - ttft_median) / (DECODE_TOKENS - 1).
+    log(`\nPhase 2 — decode throughput (${RUNS} runs × ${DECODE_TOKENS} tokens)...`, "dim");
+    const fullTimes = [];
+    for (let i = 0; i < RUNS; i++) {
+        const t = performance.now();
+        await model.chat(PROMPT, { maxNewTokens: DECODE_TOKENS });
+        fullTimes.push(performance.now() - t);
+        log(`  run ${String(i + 1).padStart(2)}/${RUNS}  ${fullTimes.at(-1).toFixed(1)} ms`, "dim");
+    }
+
+    // ── Results ──────────────────────────────────────────────────────────────
+    const ttft   = stats(ttftTimes);
+    const full   = stats(fullTimes);
+    // Decode time excludes prefill: subtract median TTFT, divide by remaining tokens.
+    const decodeMedian = (full.median - ttft.median) / (DECODE_TOKENS - 1);
+    const decodeP95    = (full.p95    - ttft.median) / (DECODE_TOKENS - 1);
+
+    const ttftPass   = criterion ? ttft.median  <= criterion.ttft   : null;
+    const decodePass = criterion ? decodeMedian <= criterion.decode : null;
+
+    log("");
+    hr();
+    log(`Model:     ${modelId} (${precision})`);
+    log(`Device:    ${device}`);
+    log(`Runs:      ${RUNS} (after ${WARMUP} warmup)`);
+    log(`Prompt:    "${PROMPT[0].content}"`);
+    log(`New tokens: ${DECODE_TOKENS}`);
+    log("");
+    log(`Time to first token`);
+    const ttftSuffix = criterion ? `  ${ttftPass ? "✓" : "✗"}  bound ≤${criterion.ttft} ms` : "";
+    log(`  Median:  ${ttft.median.toFixed(1)} ms${ttftSuffix}`, ttftPass === true ? "pass bold" : ttftPass === false ? "fail bold" : "bold");
+    log(`  p95:     ${ttft.p95.toFixed(1)} ms`);
+    log(`  Min/Max: ${ttft.min.toFixed(1)} / ${ttft.max.toFixed(1)} ms`);
+    log("");
+    log(`Decode throughput`);
+    const decodeSuffix = criterion ? `  ${decodePass ? "✓" : "✗"}  bound ≤${criterion.decode} ms/token` : "";
+    log(`  Median:  ${decodeMedian.toFixed(1)} ms/token${decodeSuffix}`, decodePass === true ? "pass bold" : decodePass === false ? "fail bold" : "bold");
+    log(`  p95:     ${decodeP95.toFixed(1)} ms/token`);
+    log(`  Full generation median: ${full.median.toFixed(0)} ms (${DECODE_TOKENS} tokens)`);
+    hr();
+    log("");
+    log("Copy these numbers into CLAUDE.md once stable across 3+ sessions.", "dim");
+
+    model.dispose();
+}
+</script>
+</body>
+</html>

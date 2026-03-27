@@ -24,6 +24,11 @@ export interface GenerateOptions {
     sampling?: SamplingOptions;
     /** Tool definitions to inject into the system prompt (JSON Schema format). */
     tools?: object[];
+    /**
+     * Streaming callback. Called with each decoded text chunk as tokens are
+     * generated. The final return value of `chat()` is the full response.
+     */
+    onChunk?: (text: string) => void;
 }
 
 interface FullConfig extends LFM2ModelConfig {
@@ -86,6 +91,23 @@ export class LFM2ForCausalLM {
             ...(options.maxNewTokens !== undefined ? { maxNewTokens: options.maxNewTokens } : {}),
             ...(options.sampling !== undefined ? { sampling: options.sampling } : {}),
         };
+
+        let onToken: ((tokenId: number) => void) | undefined;
+        if (options.onChunk) {
+            const onChunk = options.onChunk;
+            const accumulated: number[] = [];
+            let prevLength = 0;
+            onToken = (tokenId: number) => {
+                accumulated.push(tokenId);
+                const text = this.tokenizer.decode(accumulated);
+                const delta = text.slice(prevLength);
+                if (delta) {
+                    onChunk(delta);
+                    prevLength = text.length;
+                }
+            };
+        }
+
         const generatedIds = await generate(
             this.session,
             promptIds,
@@ -93,6 +115,7 @@ export class LFM2ForCausalLM {
             genCfg,
             this.hasPositionIds,
             this.inputNames,
+            onToken,
         );
         return this.tokenizer.decode(generatedIds);
     }

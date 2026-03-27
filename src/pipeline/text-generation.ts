@@ -11,7 +11,10 @@ export class TextGenerationPipeline {
         return new TextGenerationPipeline(model);
     }
 
-    /** Send a conversation and get the assistant reply. */
+    /**
+     * Send a conversation and get the assistant reply.
+     * Pass `onChunk` for streaming text output as tokens are generated.
+     */
     run(messages: Message[], options: GenerateOptions = {}): Promise<string> {
         return this.model.chat(messages, options);
     }

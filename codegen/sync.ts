@@ -14,16 +14,12 @@ const HF_REPO = "huggingface/transformers";
 const LAST_SYNC_FILE = join(import.meta.dirname, ".last-sync");
 const OUT_DIR = join(import.meta.dirname, "../src/preprocessing");
 
+// Only watch preprocessors for LFM model families.
+// Expand this set when Liquid AI releases new model variants.
 const WATCHED_PATTERNS = [
-    /^src\/transformers\/models\/[^/]+\/image_processing_[^/]+\.py$/,
-    /^src\/transformers\/models\/[^/]+\/feature_extraction_[^/]+\.py$/,
+    /^src\/transformers\/models\/lfm[^/]*\/image_processing_[^/]+\.py$/,
+    /^src\/transformers\/models\/lfm[^/]*\/feature_extraction_[^/]+\.py$/,
 ];
-
-// Registry / routing files — not processor implementations, skip them.
-const EXCLUDED_FILES = new Set([
-    "src/transformers/models/auto/image_processing_auto.py",
-    "src/transformers/models/auto/feature_extraction_auto.py",
-]);
 
 // ── GitHub API ─────────────────────────────────────────────────────────────
 
