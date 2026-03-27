@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>transformers-js · LFM2-VL latency benchmark</title>
+<style>
+  body { font-family: monospace; max-width: 680px; margin: 40px auto; padding: 0 16px; background: #0d1117; color: #e6edf3; }
+  h1 { font-size: 1rem; color: #58a6ff; margin: 0 0 24px; }
+  #log { white-space: pre; line-height: 1.6; font-size: 0.85rem; }
+  .pass { color: #3fb950; }
+  .fail { color: #f85149; }
+  .dim  { color: #8b949e; }
+  .bold { font-weight: bold; }
+  #config { margin-bottom: 24px; display: flex; flex-direction: column; gap: 8px; }
+  #config label { font-size: 0.8rem; color: #8b949e; }
+  #config input, #config select {
+    background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+    font-family: monospace; font-size: 0.85rem; padding: 4px 8px; border-radius: 4px; width: 100%;
+  }
+  button {
+    margin-top: 8px; padding: 6px 16px; background: #238636; border: none;
+    color: #fff; font-family: monospace; font-size: 0.85rem; border-radius: 4px; cursor: pointer;
+  }
+  button:hover { background: #2ea043; }
+  #preview { display: none; margin-bottom: 16px; }
+  #preview canvas { border: 1px solid #30363d; border-radius: 4px; max-width: 200px; }
+  #preview p { font-size: 0.75rem; color: #8b949e; margin: 4px 0 0; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "onnxruntime-web": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/ort.webgpu.bundle.min.mjs"
+  }
+}
+</script>
+</head>
+<body>
+<h1>transformers-js · LFM2-VL latency benchmark</h1>
+
+<div id="config">
+  <label>Model ID (HF Hub)
+    <input id="modelId" value="onnx-community/LFM2-VL-450M-ONNX" />
+  </label>
+  <label>Precision
+    <select id="precision">
+      <option value="q4" selected>q4 (~recommended for browser)</option>
+      <option value="q8">q8</option>
+      <option value="fp16">fp16</option>
+    </select>
+  </label>
+  <label>HF token (required for gated models)
+    <input id="hfToken" type="password" placeholder="hf_..." />
+  </label>
+  <label>Local mirror URL (optional — overrides HF Hub fetch)
+    <input id="mirrorUrl" placeholder="e.g. http://localhost:8001" />
+  </label>
+  <label>Test image (optional — uses generated image if empty)
+    <input id="imageFile" type="file" accept="image/*" />
+  </label>
+  <button id="runBtn">Run benchmark</button>
+</div>
+
+<div id="preview">
+  <canvas id="previewCanvas"></canvas>
+  <p id="previewLabel"></p>
+</div>
+
+<div id="log"></div>
+
+<script type="module">
+import { initRuntime, LFM2VLForConditionalGeneration, setHFToken } from "./dist/lfm2-vl.js";
+
+const PROMPT = [{ role: "user", content: "Describe this image briefly." }];
+
+const WARMUP = 1;
+const RUNS = 5;
+const DECODE_TOKENS = 20;
+
+// Target: ≤200ms TTFT (image preprocessing + encoder + decoder prefill + first token)
+const CRITERIA = {
+    "onnx-community/LFM2-VL-450M-ONNX":    { ttft: 200, decode: 30 },
+    "LiquidAI/LFM2.5-VL-1.6B-ONNX":        { ttft: 400, decode: 15 },
+    "onnx-community/LFM2-VL-3B-ONNX":       { ttft: 600, decode: 20 },
+};
+
+const el = document.getElementById("log");
+function log(msg, cls = "") {
+    el.innerHTML += `<span class="${cls}">${msg}</span>\n`;
+}
+function hr() { log("─────────────────────────────────────────"); }
+
+function percentile(sorted, p) {
+    const idx = Math.floor(p / 100 * sorted.length);
+    return sorted[Math.min(idx, sorted.length - 1)];
+}
+
+function stats(times) {
+    const s = [...times].sort((a, b) => a - b);
+    return {
+        median: percentile(s, 50),
+        p95:    percentile(s, 95),
+        min:    s[0],
+        max:    s[s.length - 1],
+    };
+}
+
+/**
+ * Load an HTMLImageElement or File into our ImageData format (RGB Float32Array, uint8 range).
+ * Canvas RGBA output is stripped to RGB.
+ */
+async function toImageData(source) {
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = source instanceof File
+            ? URL.createObjectURL(source)
+            : source;
+    });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0);
+    const raw = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    // RGBA → RGB Float32Array
+    const n = canvas.width * canvas.height;
+    const data = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+        data[i * 3]     = raw.data[i * 4];
+        data[i * 3 + 1] = raw.data[i * 4 + 1];
+        data[i * 3 + 2] = raw.data[i * 4 + 2];
+    }
+    return { data, width: canvas.width, height: canvas.height, channels: 3 };
+}
+
+/**
+ * Generate a simple test image via Canvas so the benchmark works without
+ * any external file. Draws a blue-to-purple gradient with a white circle.
+ */
+function makeTestImage(size = 512) {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext("2d");
+
+    const grad = ctx.createLinearGradient(0, 0, size, size);
+    grad.addColorStop(0,   "#1a3a8f");
+    grad.addColorStop(0.5, "#6b21a8");
+    grad.addColorStop(1,   "#be185d");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, size * 0.22, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.fill();
+
+    // Preview
+    const preview = document.getElementById("preview");
+    const pc = document.getElementById("previewCanvas");
+    const pl = document.getElementById("previewLabel");
+    pc.width = pc.height = size;
+    pc.getContext("2d").drawImage(canvas, 0, 0);
+    pl.textContent = `Generated test image (${size}×${size})`;
+    preview.style.display = "block";
+
+    const raw = ctx.getImageData(0, 0, size, size);
+    const n = size * size;
+    const data = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+        data[i * 3]     = raw.data[i * 4];
+        data[i * 3 + 1] = raw.data[i * 4 + 1];
+        data[i * 3 + 2] = raw.data[i * 4 + 2];
+    }
+    return { data, width: size, height: size, channels: 3 };
+}
+
+document.getElementById("runBtn").addEventListener("click", async () => {
+    el.innerHTML = "";
+    document.getElementById("runBtn").disabled = true;
+
+    const modelId   = document.getElementById("modelId").value.trim();
+    const precision = document.getElementById("precision").value;
+    const hfToken   = document.getElementById("hfToken").value.trim();
+    const mirrorUrl = document.getElementById("mirrorUrl").value.trim() || undefined;
+    const fileInput = document.getElementById("imageFile");
+
+    if (hfToken) setHFToken(hfToken);
+
+    let image;
+    if (fileInput.files.length > 0) {
+        const file = fileInput.files[0];
+        log(`Loading image: ${file.name}`, "dim");
+        image = await toImageData(file);
+        // Show preview
+        const preview = document.getElementById("preview");
+        const pc = document.getElementById("previewCanvas");
+        const pl = document.getElementById("previewLabel");
+        pc.width = 200; pc.height = Math.round(200 * image.height / image.width);
+        const ctx = pc.getContext("2d");
+        const tmpCanvas = document.createElement("canvas");
+        tmpCanvas.width = image.width; tmpCanvas.height = image.height;
+        const tmpCtx = tmpCanvas.getContext("2d");
+        const raw = tmpCtx.createImageData(image.width, image.height);
+        const n = image.width * image.height;
+        for (let i = 0; i < n; i++) {
+            raw.data[i * 4]     = image.data[i * 3];
+            raw.data[i * 4 + 1] = image.data[i * 3 + 1];
+            raw.data[i * 4 + 2] = image.data[i * 3 + 2];
+            raw.data[i * 4 + 3] = 255;
+        }
+        tmpCtx.putImageData(raw, 0, 0);
+        ctx.drawImage(tmpCanvas, 0, 0, pc.width, pc.height);
+        pl.textContent = `${file.name} (${image.width}×${image.height})`;
+        preview.style.display = "block";
+    } else {
+        image = makeTestImage(512);
+    }
+
+    try {
+        await run(modelId, precision, mirrorUrl, image);
+    } catch (err) {
+        log(`\nError: ${err.message}`, "fail");
+        console.error(err);
+    } finally {
+        document.getElementById("runBtn").disabled = false;
+    }
+});
+
+async function run(modelId, precision, mirrorBaseUrl, image) {
+    const criterion = CRITERIA[modelId] ?? null;
+    log("Initializing runtime...", "dim");
+    const { device } = await initRuntime("webgpu");
+    log(`  device: ${device}`, device === "webgpu" ? "pass" : "fail");
+    if (device !== "webgpu") {
+        log("  Warning: WebGPU unavailable — results reflect WASM fallback, not the target path.", "fail");
+    }
+
+    log(`\nLoading ${modelId} (${precision})...`, "dim");
+    log("  First run downloads 3 ONNX sessions (~2–5 GB depending on precision).", "dim");
+    const t0 = performance.now();
+    const model = await LFM2VLForConditionalGeneration.fromHub(modelId, { device, precision, mirrorBaseUrl });
+    log(`  loaded in ${((performance.now() - t0) / 1000).toFixed(1)} s`, "dim");
+
+    // ── Warmup ───────────────────────────────────────────────────────────────
+    log(`\nWarmup (${WARMUP} generation × ${DECODE_TOKENS} tokens)...`, "dim");
+    for (let i = 0; i < WARMUP; i++) {
+        await model.chat(PROMPT, image, { maxNewTokens: DECODE_TOKENS });
+        log(`  warmup ${i + 1}/${WARMUP}`, "dim");
+    }
+
+    // ── Phase 1: TTFT ────────────────────────────────────────────────────────
+    // maxNewTokens=1 → full preprocessing + all 3 ONNX sessions + 1 decode step
+    log(`\nPhase 1 — time to first token (${RUNS} runs)...`, "dim");
+    const ttftTimes = [];
+    for (let i = 0; i < RUNS; i++) {
+        const t = performance.now();
+        await model.chat(PROMPT, image, { maxNewTokens: 1 });
+        ttftTimes.push(performance.now() - t);
+        log(`  run ${String(i + 1).padStart(2)}/${RUNS}  ${ttftTimes.at(-1).toFixed(1)} ms`, "dim");
+    }
+
+    // ── Phase 2: Decode throughput ───────────────────────────────────────────
+    log(`\nPhase 2 — decode throughput (${RUNS} runs × ${DECODE_TOKENS} tokens)...`, "dim");
+    const fullTimes = [];
+    for (let i = 0; i < RUNS; i++) {
+        const t = performance.now();
+        await model.chat(PROMPT, image, { maxNewTokens: DECODE_TOKENS });
+        fullTimes.push(performance.now() - t);
+        log(`  run ${String(i + 1).padStart(2)}/${RUNS}  ${fullTimes.at(-1).toFixed(1)} ms`, "dim");
+    }
+
+    // ── Results ───────────────────────────────────────────────────────────────
+    const ttft  = stats(ttftTimes);
+    const full  = stats(fullTimes);
+    const decodeMedian = (full.median - ttft.median) / (DECODE_TOKENS - 1);
+    const decodeP95    = (full.p95    - ttft.median) / (DECODE_TOKENS - 1);
+
+    const ttftPass   = criterion ? ttft.median  <= criterion.ttft   : null;
+    const decodePass = criterion ? decodeMedian <= criterion.decode : null;
+
+    log("");
+    hr();
+    log(`Model:      ${modelId} (${precision})`);
+    log(`Device:     ${device}`);
+    log(`Runs:       ${RUNS} (after ${WARMUP} warmup)`);
+    log(`Image:      ${image.width}×${image.height}`);
+    log(`Prompt:     "${PROMPT[0].content}"`);
+    log(`New tokens: ${DECODE_TOKENS}`);
+    log("");
+    log(`Time to first token  (preprocessing + 3 sessions + first decode)`);
+    const ttftSuffix = criterion ? `  ${ttftPass ? "✓" : "✗"}  bound ≤${criterion.ttft} ms` : "";
+    log(`  Median:  ${ttft.median.toFixed(1)} ms${ttftSuffix}`, ttftPass === true ? "pass bold" : ttftPass === false ? "fail bold" : "bold");
+    log(`  p95:     ${ttft.p95.toFixed(1)} ms`);
+    log(`  Min/Max: ${ttft.min.toFixed(1)} / ${ttft.max.toFixed(1)} ms`);
+    log("");
+    log(`Decode throughput`);
+    const decodeSuffix = criterion ? `  ${decodePass ? "✓" : "✗"}  bound ≤${criterion.decode} ms/token` : "";
+    log(`  Median:  ${decodeMedian.toFixed(1)} ms/token${decodeSuffix}`, decodePass === true ? "pass bold" : decodePass === false ? "fail bold" : "bold");
+    log(`  p95:     ${decodeP95.toFixed(1)} ms/token`);
+    log(`  Full generation median: ${full.median.toFixed(0)} ms (${DECODE_TOKENS} tokens)`);
+    hr();
+    log("");
+    log("Copy these numbers into CLAUDE.md once stable across 3+ sessions.", "dim");
+
+    model.dispose();
+}
+</script>
+</body>
+</html>

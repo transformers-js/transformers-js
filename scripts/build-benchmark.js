@@ -29,3 +29,10 @@ await esbuild.build({
     outfile: "benchmark/dist/lfm2.js",
 });
 console.log("Built benchmark/dist/lfm2.js");
+
+await esbuild.build({
+    ...sharedConfig,
+    entryPoints: ["benchmark/lfm2-vl-entry.ts"],
+    outfile: "benchmark/dist/lfm2-vl.js",
+});
+console.log("Built benchmark/dist/lfm2-vl.js");

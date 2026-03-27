@@ -157,8 +157,13 @@ codegen/          Python→JS translator and HF sync workflow
 
 ## Next priorities
 
-1. Benchmark LFM2-2.6B (`onnx-community/LFM2-2.6B-ONNX`) — largest available text model
-2. Verify specialized fine-tunes work without code changes (Tool, RAG, Math, Extract)
-3. MoE support design — understand routing/cache differences before implementing
-4. Speculative decoding — 350M as draft, 2.6B as target; high leverage for browser UX
-5. Audio — deprioritised; revisit after text/VL path is stable
+1. **LFM2-VL latency benchmark** — VL TTFT target ≤200ms not yet measured. Prefill path differs
+   (image embeddings splice into token sequence). Needs its own benchmark. Model:
+   `onnx-community/LFM2-VL-450M-ONNX` (Working status, smallest VL model).
+2. **Verify specialized fine-tunes** — same architecture as base, should work without code changes.
+   Test: `LiquidAI/LFM2-1.2B-Tool-ONNX` (or RAG/Math/Extract), run a chat, confirm output.
+3. **Speculative decoding** — 350M draft + 2.6B verifier. High UX leverage: 2.6B quality at near-350M
+   cost. Requires new generation loop design.
+4. **IOBinding / GPU buffer optimization** — keep KV+conv cache tensors on GPU between decode steps.
+   Requires refactoring updateCache and run() to pass raw ORT tensor objects. True decode speedup path.
+5. **Audio** — deprioritised; revisit after text/VL path is stable.
