@@ -123,26 +123,17 @@ export class LFM2VLForConditionalGeneration {
         const { pixelValues, pixelAttentionMask, spatialShapes, numTiles } =
             await preprocessVLImage(image, this.maxTiles, this.useThumbnail);
 
-        // The community ONNX export processes one tile at a time: [3, H, W].
-        // Run vision encoder per tile and concatenate features.
-        const ENC  = 768; // SigLip2 native resolution used by this export
-        const TILE_PX = 3 * ENC * ENC;
-        const MASK_PX = ENC * ENC;
-        const tileFeatureArrays: Float32Array[] = [];
-        for (let i = 0; i < numTiles; i++) {
-            const imgOut = await this.embedImages.run({
-                pixel_values:         { data: pixelValues.subarray(i * TILE_PX, (i + 1) * TILE_PX),       dims: [3, ENC, ENC] },
-                pixel_attention_mask: { data: pixelAttentionMask.subarray(i * MASK_PX, (i + 1) * MASK_PX), dims: [ENC, ENC] },
-                spatial_shapes:       { data: spatialShapes.subarray(i * 2, (i + 1) * 2),                  dims: [1, 2] },
-            });
-            tileFeatureArrays.push(imgOut["image_features"]!.data as Float32Array);
-        }
-        // image_features: [numTiles * tokensPerTile * hiddenSize] (flattened)
-        const featTotalLen = tileFeatureArrays.reduce((s, f) => s + f.length, 0);
-        const imageFeatures = new Float32Array(featTotalLen);
-        let featOffset = 0;
-        for (const f of tileFeatureArrays) { imageFeatures.set(f, featOffset); featOffset += f.length; }
-        const imgEmbedTokens = featTotalLen / this.hiddenSize;
+        // NaFlex patch format: [num_tiles, max_patches, patch_dim]
+        // max_patches = 32×32 = 1024, patch_dim = 16×16×3 = 768
+        const MAX_PATCHES = 1024, PATCH_DIM = 768;
+        const imgOut = await this.embedImages.run({
+            pixel_values:         { data: pixelValues,         dims: [numTiles, MAX_PATCHES, PATCH_DIM] },
+            pixel_attention_mask: { data: pixelAttentionMask,  dims: [numTiles, MAX_PATCHES] },
+            spatial_shapes:       { data: spatialShapes,       dims: [numTiles, 2] },
+        });
+        // image_features: [num_tiles, tokens_per_tile, hidden_size] → flatten
+        const imageFeatures = imgOut["image_features"]!.data as Float32Array;
+        const imgEmbedTokens = imageFeatures.length / this.hiddenSize;
 
         // ── 2. Tokenize with image placeholder ─────────────────────────────
         // Inject <image> before the first user message content.
