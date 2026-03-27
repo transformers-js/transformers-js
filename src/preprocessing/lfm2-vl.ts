@@ -1,7 +1,7 @@
 import { resize, rescale, normalize, crop, type ImageData } from "./ops.js";
 
-const TILE_SIZE = 512;         // crop grid size
-const PATCH_SIZE = 16;         // encoder patch size
+const TILE_SIZE = 512;
+const PATCH_SIZE = 16;
 const PATCHES_PER_SIDE = TILE_SIZE / PATCH_SIZE; // 32
 const MAX_PATCHES = PATCHES_PER_SIDE * PATCHES_PER_SIDE; // 1024
 const PATCH_DIM = PATCH_SIZE * PATCH_SIZE * 3; // 768
@@ -10,19 +10,15 @@ const IMAGE_MEAN = [0.5, 0.5, 0.5];
 const IMAGE_STD  = [0.5, 0.5, 0.5];
 
 export interface VLImageTensors {
-    /** [num_tiles, MAX_PATCHES, PATCH_DIM] — NaFlex patch sequence */
+    /** community: [num_tiles, MAX_PATCHES, PATCH_DIM]; liquidai: [num_tiles, 3, 512, 512] */
     pixelValues:         Float32Array;
-    /** [num_tiles, MAX_PATCHES] — 1 for valid patches, 0 for padding */
+    /** community: [num_tiles, MAX_PATCHES]; liquidai: [num_tiles, 512, 512] */
     pixelAttentionMask:  BigInt64Array;
     /** [num_tiles, 2] — [patches_h, patches_w] per tile */
     spatialShapes:       BigInt64Array;
     numTiles:            number;
 }
 
-/**
- * Choose the (rows, cols) tiling that maximises image resolution within
- * maxContentTiles.
- */
 function bestTiling(w: number, h: number, maxContent: number): [number, number] {
     let bestRows = 1, bestCols = 1, bestScale = 0;
     for (let rows = 1; rows <= maxContent; rows++) {
@@ -42,18 +38,16 @@ function bestTiling(w: number, h: number, maxContent: number): [number, number] 
 }
 
 /**
- * Resize a tile to TILE_SIZE×TILE_SIZE, rescale, normalize, then extract
- * 16×16 patches in raster order. Each patch is flattened in CHW order
- * (all red values, then green, then blue) to a 768-dim vector.
- *
- * Returns patches [MAX_PATCHES, PATCH_DIM] and a mask [MAX_PATCHES] of 1n.
+ * Resize a tile to 512×512, rescale, normalize, then extract 16×16 patches
+ * in raster order. Each patch is flattened in CHW order to a 768-dim vector.
+ * Returns patches [MAX_PATCHES, PATCH_DIM] and mask [MAX_PATCHES] of 1n.
  */
 async function tileToPatches(image: ImageData): Promise<{ patches: Float32Array; mask: BigInt64Array }> {
     const resized    = await resize(image, { width: TILE_SIZE, height: TILE_SIZE }, "bilinear");
     const rescaled   = rescale(resized, 1 / 255);
     const normalized = normalize(rescaled, IMAGE_MEAN, IMAGE_STD);
 
-    const { data } = normalized; // HWC [TILE_SIZE, TILE_SIZE, 3]
+    const { data } = normalized; // HWC [512, 512, 3]
     const W = TILE_SIZE, C = 3;
     const ph = PATCH_SIZE, pw = PATCH_SIZE;
 
@@ -78,24 +72,81 @@ async function tileToPatches(image: ImageData): Promise<{ patches: Float32Array;
 }
 
 /**
- * Tile an image for LFM2-VL and return NaFlex patch tensors:
- *   pixel_values [num_tiles, MAX_PATCHES, PATCH_DIM]
- *   pixel_attention_mask [num_tiles, MAX_PATCHES]
- *   spatial_shapes [num_tiles, 2]
+ * Resize a tile to 512×512, rescale, normalize, then convert HWC→CHW.
+ * Returns chw [3, 512, 512] and mask [512×512] of 1n.
  */
+async function tileToCHW(image: ImageData): Promise<{ chw: Float32Array; mask: BigInt64Array }> {
+    const resized    = await resize(image, { width: TILE_SIZE, height: TILE_SIZE }, "bilinear");
+    const rescaled   = rescale(resized, 1 / 255);
+    const normalized = normalize(rescaled, IMAGE_MEAN, IMAGE_STD);
+
+    const { data } = normalized; // HWC [512, 512, 3]
+    const H = TILE_SIZE, W = TILE_SIZE, C = 3;
+    const chw = new Float32Array(C * H * W);
+    for (let c = 0; c < C; c++) {
+        for (let h = 0; h < H; h++) {
+            for (let w = 0; w < W; w++) {
+                chw[c * H * W + h * W + w] = data[(h * W + w) * C + c]!;
+            }
+        }
+    }
+    return { chw, mask: new BigInt64Array(H * W).fill(1n) };
+}
+
 export async function preprocessVLImage(
     image: ImageData,
     maxTiles = 10,
     useThumbnail = false,
+    flavor: "liquidai" | "community" = "community",
 ): Promise<VLImageTensors> {
     const maxContent = useThumbnail ? maxTiles - 1 : maxTiles;
     const [rows, cols] = bestTiling(image.width, image.height, maxContent);
 
-    const patchArrays: Float32Array[] = [];
-    const maskArrays: BigInt64Array[] = [];
-
     const cropW = Math.floor(image.width  / cols);
     const cropH = Math.floor(image.height / rows);
+
+    if (flavor === "liquidai") {
+        const chwArrays:  Float32Array[]   = [];
+        const maskArrays: BigInt64Array[] = [];
+
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const left   = c * cropW;
+                const top    = r * cropH;
+                const right  = c < cols - 1 ? left + cropW : image.width;
+                const bottom = r < rows - 1 ? top  + cropH : image.height;
+                const { chw, mask } = await tileToCHW(crop(image, { left, top, right, bottom }));
+                chwArrays.push(chw);
+                maskArrays.push(mask);
+            }
+        }
+        if (useThumbnail) {
+            const { chw, mask } = await tileToCHW(image);
+            chwArrays.push(chw);
+            maskArrays.push(mask);
+        }
+
+        const numTiles = chwArrays.length;
+        const tilePixels = 3 * TILE_SIZE * TILE_SIZE;
+        const pixelValues = new Float32Array(numTiles * tilePixels);
+        const pixelAttentionMask = new BigInt64Array(numTiles * TILE_SIZE * TILE_SIZE);
+        for (let i = 0; i < numTiles; i++) {
+            pixelValues.set(chwArrays[i]!, i * tilePixels);
+            pixelAttentionMask.set(maskArrays[i]!, i * TILE_SIZE * TILE_SIZE);
+        }
+
+        const spatialShapes = new BigInt64Array(numTiles * 2);
+        for (let i = 0; i < numTiles; i++) {
+            spatialShapes[i * 2]     = BigInt(PATCHES_PER_SIDE);
+            spatialShapes[i * 2 + 1] = BigInt(PATCHES_PER_SIDE);
+        }
+
+        return { pixelValues, pixelAttentionMask, spatialShapes, numTiles };
+    }
+
+    // community: NaFlex patch format
+    const patchArrays: Float32Array[]  = [];
+    const maskArrays:  BigInt64Array[] = [];
 
     for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
@@ -108,7 +159,6 @@ export async function preprocessVLImage(
             maskArrays.push(mask);
         }
     }
-
     if (useThumbnail) {
         const { patches, mask } = await tileToPatches(image);
         patchArrays.push(patches);
@@ -125,8 +175,8 @@ export async function preprocessVLImage(
 
     const spatialShapes = new BigInt64Array(numTiles * 2);
     for (let i = 0; i < numTiles; i++) {
-        spatialShapes[i * 2]     = BigInt(PATCHES_PER_SIDE); // 32
-        spatialShapes[i * 2 + 1] = BigInt(PATCHES_PER_SIDE); // 32
+        spatialShapes[i * 2]     = BigInt(PATCHES_PER_SIDE);
+        spatialShapes[i * 2 + 1] = BigInt(PATCHES_PER_SIDE);
     }
 
     return { pixelValues, pixelAttentionMask, spatialShapes, numTiles };

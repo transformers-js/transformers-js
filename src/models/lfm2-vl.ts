@@ -7,15 +7,15 @@ import { preprocessVLImage } from "../preprocessing/lfm2-vl.js";
 import type { Device } from "../runtime/index.js";
 import type { ImageData } from "../preprocessing/ops.js";
 
-export type LFM2VLPrecision = "q4" | "q4f16" | "fp16";
+export type LFM2VLPrecision = "q4" | "q4f16" | "q8" | "fp16";
 
 export interface LFM2VLOptions {
     device?: Device;
     /**
      * Decoder precision. Encoder always uses fp16.
-     * - "q4"    (~1.5GB, WebGPU recommended)
-     * - "q4f16" (~mixed precision, q4 weights + fp16 activations)
-     * - "fp16"  (~3.2GB, server)
+     * Available precisions depend on export:
+     * - LiquidAI exports: "q4", "q8", "fp16"
+     * - Community exports: "q4", "q4f16", "fp16"
      * Default: "q4"
      */
     precision?: LFM2VLPrecision;
@@ -45,11 +45,35 @@ interface VLConfig {
     text_config: LFM2ModelConfig & { eos_token_id: number };
 }
 
-// Encoder and embed_tokens always fp16; only decoder varies.
-const DECODER_FILE: Record<LFM2VLPrecision, [string, string]> = {
-    q4:    ["onnx/decoder_model_merged_q4.onnx",    "onnx/decoder_model_merged_q4.onnx_data"],
-    q4f16: ["onnx/decoder_model_merged_q4f16.onnx", "onnx/decoder_model_merged_q4f16.onnx_data"],
-    fp16:  ["onnx/decoder_model_merged_fp16.onnx",  "onnx/decoder_model_merged_fp16.onnx_data"],
+/**
+ * LiquidAI official exports and onnx-community exports use different file
+ * naming conventions and different vision encoder input formats.
+ *
+ * liquidai:  embed_images_fp16.onnx | decoder_q4.onnx | CHW images [N,3,512,512]
+ * community: vision_encoder_fp16.onnx | decoder_model_merged_q4.onnx | NaFlex patches [N,1024,768]
+ */
+type VLExportFlavor = "liquidai" | "community";
+
+function detectFlavor(modelId: string): VLExportFlavor {
+    return modelId.startsWith("LiquidAI/") ? "liquidai" : "community";
+}
+
+const VISION_ENCODER: Record<VLExportFlavor, [string, string]> = {
+    liquidai:  ["onnx/embed_images_fp16.onnx",  "onnx/embed_images_fp16.onnx_data"],
+    community: ["onnx/vision_encoder_fp16.onnx", "onnx/vision_encoder_fp16.onnx_data"],
+};
+
+const DECODER: Record<VLExportFlavor, Partial<Record<LFM2VLPrecision, [string, string]>>> = {
+    liquidai: {
+        q4:   ["onnx/decoder_q4.onnx",   "onnx/decoder_q4.onnx_data"],
+        q8:   ["onnx/decoder_q8.onnx",   "onnx/decoder_q8.onnx_data"],
+        fp16: ["onnx/decoder_fp16.onnx", "onnx/decoder_fp16.onnx_data"],
+    },
+    community: {
+        q4:    ["onnx/decoder_model_merged_q4.onnx",    "onnx/decoder_model_merged_q4.onnx_data"],
+        q4f16: ["onnx/decoder_model_merged_q4f16.onnx", "onnx/decoder_model_merged_q4f16.onnx_data"],
+        fp16:  ["onnx/decoder_model_merged_fp16.onnx",  "onnx/decoder_model_merged_fp16.onnx_data"],
+    },
 };
 
 export class LFM2VLForConditionalGeneration {
@@ -63,6 +87,7 @@ export class LFM2VLForConditionalGeneration {
         private readonly imageTokenId: number,
         private readonly maxTiles: number,
         private readonly useThumbnail: boolean,
+        private readonly flavor: VLExportFlavor,
         private readonly hasPositionIds: boolean,
         private readonly hiddenSize: number,
         private readonly decoderInputNames: string[],
@@ -70,53 +95,71 @@ export class LFM2VLForConditionalGeneration {
 
     static async fromHub(modelId: string, options: LFM2VLOptions = {}): Promise<LFM2VLForConditionalGeneration> {
         const { device = "webgpu", precision = "q4", mirrorBaseUrl } = options;
-        const [decoderFile, decoderData] = DECODER_FILE[precision];
+        const flavor = detectFlavor(modelId);
 
-        const [
-            visionEncoderBuffer, visionEncoderData,
-            embedTokensBuffer, embedTokensData,
-            decoderBuffer, decoderDataBuffer,
-            config,
-            tokenizer,
-        ] = await Promise.all([
-            fetchRaw(modelId, "onnx/vision_encoder_fp16.onnx", mirrorBaseUrl),
-            fetchRaw(modelId, "onnx/vision_encoder_fp16.onnx_data", mirrorBaseUrl),
-            fetchRaw(modelId, "onnx/embed_tokens_fp16.onnx", mirrorBaseUrl),
-            fetchRaw(modelId, "onnx/embed_tokens_fp16.onnx_data", mirrorBaseUrl),
+        const [visionFile, visionDataFile] = VISION_ENCODER[flavor];
+        const decoderFiles = DECODER[flavor][precision];
+        if (!decoderFiles) {
+            throw new Error(`Precision "${precision}" is not available for ${flavor} exports.`);
+        }
+        const [decoderFile, decoderDataFile] = decoderFiles;
+
+        // LiquidAI embed_tokens is self-contained (no .onnx_data); community has external data.
+        const embedTokensFile = "onnx/embed_tokens_fp16.onnx";
+        const embedTokensDataFile = flavor === "community" ? "onnx/embed_tokens_fp16.onnx_data" : null;
+
+        const fetchList: Promise<ArrayBuffer>[] = [
+            fetchRaw(modelId, visionFile, mirrorBaseUrl),
+            fetchRaw(modelId, visionDataFile, mirrorBaseUrl),
+            fetchRaw(modelId, embedTokensFile, mirrorBaseUrl),
             fetchRaw(modelId, decoderFile, mirrorBaseUrl),
-            fetchRaw(modelId, decoderData, mirrorBaseUrl),
-            fetchJSON<VLConfig>(modelId, "config.json", mirrorBaseUrl),
+            fetchRaw(modelId, decoderDataFile, mirrorBaseUrl),
+        ];
+        if (embedTokensDataFile) fetchList.splice(3, 0, fetchRaw(modelId, embedTokensDataFile, mirrorBaseUrl));
+
+        const config = await fetchJSON<VLConfig>(modelId, "config.json", mirrorBaseUrl);
+        const [tokenizer, ...buffers] = await Promise.all([
             LFM2Tokenizer.fromHub(modelId, mirrorBaseUrl),
+            ...fetchList,
         ]);
 
+        let idx = 0;
+        const visionBuffer     = buffers[idx++]!;
+        const visionDataBuffer = buffers[idx++]!;
+        const embedTokensBuffer = buffers[idx++]!;
+        const embedTokensDataBuffer = embedTokensDataFile ? buffers[idx++]! : null;
+        const decoderBuffer    = buffers[idx++]!;
+        const decoderDataBuffer = buffers[idx++]!;
+
+        const embedTokensExtData = embedTokensDataBuffer
+            ? [{ path: "embed_tokens_fp16.onnx_data", data: embedTokensDataBuffer }]
+            : undefined;
+
         const [embedImagesSession, embedTokensSession, decoderSession] = await Promise.all([
-            ONNXSession.load(visionEncoderBuffer, device, [
-                { path: "vision_encoder_fp16.onnx_data", data: visionEncoderData },
+            ONNXSession.load(visionBuffer, device, [
+                { path: visionDataFile.split("/").pop()!, data: visionDataBuffer },
             ]),
-            ONNXSession.load(embedTokensBuffer, device, [
-                { path: "embed_tokens_fp16.onnx_data", data: embedTokensData },
-            ]),
+            ONNXSession.load(embedTokensBuffer, device, embedTokensExtData),
             ONNXSession.load(decoderBuffer, device, [
-                { path: decoderData.split("/").pop()!, data: decoderDataBuffer },
+                { path: decoderDataFile.split("/").pop()!, data: decoderDataBuffer },
             ]),
         ]);
 
         const decInputNames: string[] = decoderSession.inputNames;
-        const hasPositionIds = decInputNames.includes("position_ids");
-
         const textCfg = config.text_config;
 
         return new LFM2VLForConditionalGeneration(
             embedImagesSession,
             embedTokensSession,
             decoderSession,
-            tokenizer,
+            tokenizer as LFM2Tokenizer,
             textCfg,
             textCfg.eos_token_id,
             config.image_token_id,
             config.max_tiles,
             config.use_thumbnail ?? false,
-            hasPositionIds,
+            flavor,
+            decInputNames.includes("position_ids"),
             textCfg.hidden_size,
             decInputNames,
         );
@@ -133,24 +176,33 @@ export class LFM2VLForConditionalGeneration {
         // ── 1. Image preprocessing ─────────────────────────────────────────
         const t0 = t?.();
         const { pixelValues, pixelAttentionMask, spatialShapes, numTiles } =
-            await preprocessVLImage(image, this.maxTiles, this.useThumbnail);
+            await preprocessVLImage(image, this.maxTiles, this.useThumbnail, this.flavor);
         const t1 = t?.();
 
-        // NaFlex patch format: [num_tiles, max_patches, patch_dim]
-        // max_patches = 32×32 = 1024, patch_dim = 16×16×3 = 768
-        const MAX_PATCHES = 1024, PATCH_DIM = 768;
-        const imgOut = await this.embedImages.run({
-            pixel_values:         { data: pixelValues,         dims: [numTiles, MAX_PATCHES, PATCH_DIM] },
-            pixel_attention_mask: { data: pixelAttentionMask,  dims: [numTiles, MAX_PATCHES] },
-            spatial_shapes:       { data: spatialShapes,       dims: [numTiles, 2] },
-        });
-        // image_features: [num_tiles, tokens_per_tile, hidden_size] → flatten
+        // Dispatch to the correct vision encoder input format.
+        let imgOut: Record<string, { data: unknown; dims: readonly number[] }>;
+        if (this.flavor === "liquidai") {
+            // CHW image format: [num_tiles, 3, 512, 512]
+            imgOut = await this.embedImages.run({
+                pixel_values:         { data: pixelValues,        dims: [numTiles, 3, 512, 512] },
+                pixel_attention_mask: { data: pixelAttentionMask, dims: [numTiles, 512, 512] },
+                spatial_shapes:       { data: spatialShapes,       dims: [numTiles, 2] },
+            });
+        } else {
+            // NaFlex patch format: [num_tiles, max_patches, patch_dim]
+            const MAX_PATCHES = 1024, PATCH_DIM = 768;
+            imgOut = await this.embedImages.run({
+                pixel_values:         { data: pixelValues,        dims: [numTiles, MAX_PATCHES, PATCH_DIM] },
+                pixel_attention_mask: { data: pixelAttentionMask, dims: [numTiles, MAX_PATCHES] },
+                spatial_shapes:       { data: spatialShapes,       dims: [numTiles, 2] },
+            });
+        }
+
         const imageFeatures = imgOut["image_features"]!.data as Float32Array;
         const imgEmbedTokens = imageFeatures.length / this.hiddenSize;
         const t2 = t?.();
 
         // ── 2. Tokenize with image placeholder ─────────────────────────────
-        // Inject <image> before the first user message content.
         const vlMessages = injectImageToken(messages);
         const promptIds = this.tokenizer.encodeChat(vlMessages);
 
@@ -163,7 +215,6 @@ export class LFM2VLForConditionalGeneration {
         const t3 = t?.();
 
         // ── 4. Splice image embeddings at image_token positions ────────────
-        // Each image_token_id placeholder expands to imgEmbedTokens embedding rows.
         const prefillEmbeds = spliceImageEmbeds(
             tokenEmbeds,
             promptIds,
@@ -177,12 +228,11 @@ export class LFM2VLForConditionalGeneration {
         // ── 5. Prefill decoder ─────────────────────────────────────────────
         const cache = initCache(this.decoderInputNames, this.modelCfg);
         const attnMask = new BigInt64Array(prefillSeqLen).fill(1n);
-
         const hasNumLogitsToKeep = this.decoderInputNames.includes("num_logits_to_keep");
 
         const prefillInputs: Record<string, import("../runtime/session.js").TensorInput> = {
-            inputs_embeds: { data: prefillEmbeds, dims: [1, prefillSeqLen, this.hiddenSize] },
-            attention_mask: { data: attnMask, dims: [1, prefillSeqLen] },
+            inputs_embeds:  { data: prefillEmbeds, dims: [1, prefillSeqLen, this.hiddenSize] },
+            attention_mask: { data: attnMask,       dims: [1, prefillSeqLen] },
             ...cache,
         };
         if (this.hasPositionIds) {
@@ -199,7 +249,7 @@ export class LFM2VLForConditionalGeneration {
         updateCache(cache, prefillOut);
 
         const logitsDims = prefillOut["logits"]!.dims;
-        const vocabSize = logitsDims[logitsDims.length - 1]!;
+        const vocabSize  = logitsDims[logitsDims.length - 1]!;
         const logitsData = prefillOut["logits"]!.data as Float32Array;
         const lastLogits = logitsData.subarray(logitsData.length - vocabSize);
         let nextToken = sampling ? sampleTopP(lastLogits, sampling) : argmax(lastLogits);
@@ -210,7 +260,6 @@ export class LFM2VLForConditionalGeneration {
         let pastLen = prefillSeqLen;
 
         while (nextToken !== this.eosTokenId && generated.length < maxNewTokens) {
-            // Embed single new token
             const singleId = new BigInt64Array([BigInt(nextToken)]);
             const embedOut = await this.embedTokens.run({
                 input_ids: { data: singleId, dims: [1, 1] },
@@ -243,11 +292,11 @@ export class LFM2VLForConditionalGeneration {
 
         if (options.timing != null && t0 != null && t1 != null && t2 != null && t3 != null && t4 != null) {
             const t5 = performance.now();
-            options.timing.preprocessMs      = t1 - t0;
-            options.timing.visionEncoderMs   = t2 - t1;
-            options.timing.embedTokensMs     = t3 - t2;
-            options.timing.decoderPrefillMs  = t4 - t3;
-            options.timing.firstDecodeMs     = t5 - t4;
+            options.timing.preprocessMs     = t1 - t0;
+            options.timing.visionEncoderMs  = t2 - t1;
+            options.timing.embedTokensMs    = t3 - t2;
+            options.timing.decoderPrefillMs = t4 - t3;
+            options.timing.firstDecodeMs    = t5 - t4;
         }
 
         return this.tokenizer.decode(generated);
@@ -262,10 +311,6 @@ export class LFM2VLForConditionalGeneration {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/**
- * Inject the <image> token before the first user message's content so the
- * tokenizer sees it as a special token and maps it to image_token_id=396.
- */
 function injectImageToken(messages: Message[]): Message[] {
     const out: Message[] = [];
     let injected = false;
@@ -280,33 +325,23 @@ function injectImageToken(messages: Message[]): Message[] {
     return out;
 }
 
-/**
- * Build a new inputs_embeds Float32Array where each image_token_id in promptIds
- * is replaced by imgEmbedTokens rows of image embeddings from imageFeatures.
- *
- * imageFeatures layout: [numTiles * TOKENS_PER_TILE, hiddenSize] (flattened).
- */
 function spliceImageEmbeds(
-    tokenEmbeds: Float32Array,   // [seqLen, hiddenSize] flattened (from embed_tokens output [1, seqLen, hiddenSize])
+    tokenEmbeds: Float32Array,
     promptIds: number[],
     imageTokenId: number,
-    imageFeatures: Float32Array, // [numTiles * tokensPerTile, hiddenSize] flattened
+    imageFeatures: Float32Array,
     imgEmbedTokens: number,
     hiddenSize: number,
 ): Float32Array {
-    // Count output tokens: replace each image_token_id with imgEmbedTokens rows
     const outSeqLen = promptIds.reduce(
         (acc, id) => acc + (id === imageTokenId ? imgEmbedTokens : 1),
         0,
     );
     const out = new Float32Array(outSeqLen * hiddenSize);
-
-    let outPos = 0;
-    let imgFeaturePos = 0; // position in imageFeatures (in tokens)
+    let outPos = 0, imgFeaturePos = 0;
 
     for (let i = 0; i < promptIds.length; i++) {
         if (promptIds[i] === imageTokenId) {
-            // Copy imgEmbedTokens rows from imageFeatures
             const src = imageFeatures.subarray(
                 imgFeaturePos * hiddenSize,
                 (imgFeaturePos + imgEmbedTokens) * hiddenSize,
@@ -315,11 +350,9 @@ function spliceImageEmbeds(
             outPos += imgEmbedTokens;
             imgFeaturePos += imgEmbedTokens;
         } else {
-            // Copy one token embedding from tokenEmbeds (batch dim 0 already stripped)
             out.set(tokenEmbeds.subarray(i * hiddenSize, (i + 1) * hiddenSize), outPos * hiddenSize);
             outPos++;
         }
     }
-
     return out;
 }

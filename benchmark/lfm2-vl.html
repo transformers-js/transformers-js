@@ -39,12 +39,17 @@
 
 <div id="config">
   <label>Model ID (HF Hub)
-    <input id="modelId" value="onnx-community/LFM2-VL-450M-ONNX" />
+    <select id="modelId">
+      <option value="onnx-community/LFM2-VL-450M-ONNX">onnx-community/LFM2-VL-450M-ONNX</option>
+      <option value="LiquidAI/LFM2.5-VL-1.6B-ONNX" selected>LiquidAI/LFM2.5-VL-1.6B-ONNX</option>
+      <option value="onnx-community/LFM2-VL-3B-ONNX">onnx-community/LFM2-VL-3B-ONNX</option>
+    </select>
   </label>
   <label>Precision
     <select id="precision">
-      <option value="q4" selected>q4 (~recommended for browser)</option>
-      <option value="q4f16">q4f16 (mixed precision)</option>
+      <option value="q4" selected>q4</option>
+      <option value="q4f16">q4f16 (community only)</option>
+      <option value="q8">q8 (LiquidAI only)</option>
       <option value="fp16">fp16</option>
     </select>
   </label>
@@ -181,7 +186,7 @@ document.getElementById("runBtn").addEventListener("click", async () => {
     el.innerHTML = "";
     document.getElementById("runBtn").disabled = true;
 
-    const modelId   = document.getElementById("modelId").value.trim();
+    const modelId   = document.getElementById("modelId").value;
     const precision = document.getElementById("precision").value;
     const hfToken   = document.getElementById("hfToken").value.trim();
     const mirrorUrl = document.getElementById("mirrorUrl").value.trim() || undefined;
