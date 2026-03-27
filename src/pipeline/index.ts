@@ -28,8 +28,8 @@ export async function pipeline(
     const { model, ...rest } = options;
     switch (task) {
         case "text-generation":
-            return TextGenerationPipeline.create(model, rest);
+            return TextGenerationPipeline.create(model, rest as Parameters<typeof TextGenerationPipeline.create>[1]);
         case "image-text-to-text":
-            return ImageTextToTextPipeline.create(model, rest);
+            return ImageTextToTextPipeline.create(model, rest as Parameters<typeof ImageTextToTextPipeline.create>[1]);
     }
 }

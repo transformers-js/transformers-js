@@ -7,15 +7,15 @@ import { preprocessVLImage, TOKENS_PER_TILE } from "../preprocessing/lfm2-vl.js"
 import type { Device } from "../runtime/index.js";
 import type { ImageData } from "../preprocessing/ops.js";
 
-export type LFM2VLPrecision = "q4" | "q8" | "fp16";
+export type LFM2VLPrecision = "q4" | "q4f16" | "fp16";
 
 export interface LFM2VLOptions {
     device?: Device;
     /**
      * Decoder precision. Encoder always uses fp16.
-     * - "q4"  (~1.5GB, WebGPU recommended)
-     * - "q8"  (~2.2GB)
-     * - "fp16" (~3.2GB, server)
+     * - "q4"    (~1.5GB, WebGPU recommended)
+     * - "q4f16" (~mixed precision, q4 weights + fp16 activations)
+     * - "fp16"  (~3.2GB, server)
      * Default: "q4"
      */
     precision?: LFM2VLPrecision;
@@ -34,11 +34,11 @@ interface VLConfig {
     text_config: LFM2ModelConfig & { eos_token_id: number };
 }
 
-// Encoder always fp16; only decoder varies.
+// Encoder and embed_tokens always fp16; only decoder varies.
 const DECODER_FILE: Record<LFM2VLPrecision, [string, string]> = {
-    q4:   ["onnx/decoder_q4.onnx",   "onnx/decoder_q4.onnx_data"],
-    q8:   ["onnx/decoder_q8.onnx",   "onnx/decoder_q8.onnx_data"],
-    fp16: ["onnx/decoder_fp16.onnx", "onnx/decoder_fp16.onnx_data"],
+    q4:    ["onnx/decoder_model_merged_q4.onnx",    "onnx/decoder_model_merged_q4.onnx_data"],
+    q4f16: ["onnx/decoder_model_merged_q4f16.onnx", "onnx/decoder_model_merged_q4f16.onnx_data"],
+    fp16:  ["onnx/decoder_model_merged_fp16.onnx",  "onnx/decoder_model_merged_fp16.onnx_data"],
 };
 
 export class LFM2VLForConditionalGeneration {
@@ -61,14 +61,14 @@ export class LFM2VLForConditionalGeneration {
         const [decoderFile, decoderData] = DECODER_FILE[precision];
 
         const [
-            embedImagesBuffer, embedImagesData,
+            visionEncoderBuffer, visionEncoderData,
             embedTokensBuffer, embedTokensData,
             decoderBuffer, decoderDataBuffer,
             config,
             tokenizer,
         ] = await Promise.all([
-            fetchRaw(modelId, "onnx/embed_images_fp16.onnx", mirrorBaseUrl),
-            fetchRaw(modelId, "onnx/embed_images_fp16.onnx_data", mirrorBaseUrl),
+            fetchRaw(modelId, "onnx/vision_encoder_fp16.onnx", mirrorBaseUrl),
+            fetchRaw(modelId, "onnx/vision_encoder_fp16.onnx_data", mirrorBaseUrl),
             fetchRaw(modelId, "onnx/embed_tokens_fp16.onnx", mirrorBaseUrl),
             fetchRaw(modelId, "onnx/embed_tokens_fp16.onnx_data", mirrorBaseUrl),
             fetchRaw(modelId, decoderFile, mirrorBaseUrl),
@@ -78,8 +78,8 @@ export class LFM2VLForConditionalGeneration {
         ]);
 
         const [embedImagesSession, embedTokensSession, decoderSession] = await Promise.all([
-            ONNXSession.load(embedImagesBuffer, device, [
-                { path: "embed_images_fp16.onnx_data", data: embedImagesData },
+            ONNXSession.load(visionEncoderBuffer, device, [
+                { path: "vision_encoder_fp16.onnx_data", data: visionEncoderData },
             ]),
             ONNXSession.load(embedTokensBuffer, device, [
                 { path: "embed_tokens_fp16.onnx_data", data: embedTokensData },
