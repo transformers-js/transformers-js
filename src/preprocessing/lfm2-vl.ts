@@ -56,8 +56,9 @@ async function normalizeTile(image: ImageData): Promise<Float32Array> {
 export async function preprocessVLImage(
     image: ImageData,
     maxTiles = 10,
+    useThumbnail = false,
 ): Promise<VLImageTensors> {
-    const maxContent = maxTiles - 1; // reserve 1 slot for thumbnail
+    const maxContent = useThumbnail ? maxTiles - 1 : maxTiles; // thumbnail occupies one slot
     const [rows, cols] = bestTiling(image.width, image.height, maxContent);
 
     const tilePxls: Float32Array[] = [];
@@ -76,8 +77,8 @@ export async function preprocessVLImage(
         }
     }
 
-    // Thumbnail — whole image at 512×512
-    tilePxls.push(await normalizeTile(image));
+    // Thumbnail — whole image at 512×512 (only when model uses it)
+    if (useThumbnail) tilePxls.push(await normalizeTile(image));
 
     const numTiles     = tilePxls.length;
     const pixPerTile   = 3 * TILE_SIZE * TILE_SIZE;

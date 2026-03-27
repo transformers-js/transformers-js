@@ -31,6 +31,7 @@ export interface VLGenerateOptions {
 interface VLConfig {
     image_token_id: number;
     max_tiles: number;
+    use_thumbnail?: boolean;
     text_config: LFM2ModelConfig & { eos_token_id: number };
 }
 
@@ -51,6 +52,7 @@ export class LFM2VLForConditionalGeneration {
         private readonly eosTokenId: number,
         private readonly imageTokenId: number,
         private readonly maxTiles: number,
+        private readonly useThumbnail: boolean,
         private readonly hasPositionIds: boolean,
         private readonly hiddenSize: number,
         private readonly decoderInputNames: string[],
@@ -103,6 +105,7 @@ export class LFM2VLForConditionalGeneration {
             textCfg.eos_token_id,
             config.image_token_id,
             config.max_tiles,
+            config.use_thumbnail ?? false,
             hasPositionIds,
             textCfg.hidden_size,
             decInputNames,
@@ -118,17 +121,27 @@ export class LFM2VLForConditionalGeneration {
 
         // ── 1. Image preprocessing ─────────────────────────────────────────
         const { pixelValues, pixelAttentionMask, spatialShapes, numTiles } =
-            await preprocessVLImage(image, this.maxTiles);
+            await preprocessVLImage(image, this.maxTiles, this.useThumbnail);
 
-        const imgOut = await this.embedImages.run({
-            pixel_values:        { data: pixelValues,        dims: [numTiles, 3, 512, 512] },
-            pixel_attention_mask:{ data: pixelAttentionMask, dims: [numTiles, 512, 512] },
-            spatial_shapes:      { data: spatialShapes,      dims: [numTiles, 2] },
-        });
-
-        // image_features: [numTiles, TOKENS_PER_TILE, hiddenSize]
-        const imageFeatures = imgOut["image_features"]!.data as Float32Array;
-        const imgEmbedTokens = numTiles * TOKENS_PER_TILE;
+        // The community ONNX export processes one tile at a time: [3, 512, 512].
+        // Run vision encoder per tile and concatenate features.
+        const TILE_PX  = 3 * 512 * 512;
+        const MASK_PX  = 512 * 512;
+        const tileFeatureArrays: Float32Array[] = [];
+        for (let i = 0; i < numTiles; i++) {
+            const imgOut = await this.embedImages.run({
+                pixel_values:         { data: pixelValues.subarray(i * TILE_PX, (i + 1) * TILE_PX),       dims: [3, 512, 512] },
+                pixel_attention_mask: { data: pixelAttentionMask.subarray(i * MASK_PX, (i + 1) * MASK_PX), dims: [512, 512] },
+                spatial_shapes:       { data: spatialShapes.subarray(i * 2, (i + 1) * 2),                  dims: [2] },
+            });
+            tileFeatureArrays.push(imgOut["image_features"]!.data as Float32Array);
+        }
+        // image_features: [numTiles * tokensPerTile * hiddenSize] (flattened)
+        const featTotalLen = tileFeatureArrays.reduce((s, f) => s + f.length, 0);
+        const imageFeatures = new Float32Array(featTotalLen);
+        let featOffset = 0;
+        for (const f of tileFeatureArrays) { imageFeatures.set(f, featOffset); featOffset += f.length; }
+        const imgEmbedTokens = featTotalLen / this.hiddenSize;
 
         // ── 2. Tokenize with image placeholder ─────────────────────────────
         // Inject <image> before the first user message content.
