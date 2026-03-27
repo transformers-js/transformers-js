@@ -3,7 +3,7 @@ import { ONNXSession } from "../runtime/session.js";
 import { LFM2Tokenizer, type Message } from "../tokenization/lfm2-tokenizer.js";
 import { initCache, updateCache, type LFM2ModelConfig } from "../generation/loop.js";
 import { argmax, sampleTopP, type SamplingOptions } from "../generation/sampling.js";
-import { preprocessVLImage, TOKENS_PER_TILE } from "../preprocessing/lfm2-vl.js";
+import { preprocessVLImage } from "../preprocessing/lfm2-vl.js";
 import type { Device } from "../runtime/index.js";
 import type { ImageData } from "../preprocessing/ops.js";
 
@@ -123,15 +123,16 @@ export class LFM2VLForConditionalGeneration {
         const { pixelValues, pixelAttentionMask, spatialShapes, numTiles } =
             await preprocessVLImage(image, this.maxTiles, this.useThumbnail);
 
-        // The community ONNX export processes one tile at a time: [3, 512, 512].
+        // The community ONNX export processes one tile at a time: [3, H, W].
         // Run vision encoder per tile and concatenate features.
-        const TILE_PX  = 3 * 512 * 512;
-        const MASK_PX  = 512 * 512;
+        const ENC  = 768; // SigLip2 native resolution used by this export
+        const TILE_PX = 3 * ENC * ENC;
+        const MASK_PX = ENC * ENC;
         const tileFeatureArrays: Float32Array[] = [];
         for (let i = 0; i < numTiles; i++) {
             const imgOut = await this.embedImages.run({
-                pixel_values:         { data: pixelValues.subarray(i * TILE_PX, (i + 1) * TILE_PX),       dims: [3, 512, 512] },
-                pixel_attention_mask: { data: pixelAttentionMask.subarray(i * MASK_PX, (i + 1) * MASK_PX), dims: [512, 512] },
+                pixel_values:         { data: pixelValues.subarray(i * TILE_PX, (i + 1) * TILE_PX),       dims: [3, ENC, ENC] },
+                pixel_attention_mask: { data: pixelAttentionMask.subarray(i * MASK_PX, (i + 1) * MASK_PX), dims: [ENC, ENC] },
                 spatial_shapes:       { data: spatialShapes.subarray(i * 2, (i + 1) * 2),                  dims: [2] },
             });
             tileFeatureArrays.push(imgOut["image_features"]!.data as Float32Array);
