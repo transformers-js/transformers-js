@@ -5,7 +5,9 @@ const TILE_SIZE = 512;
 /** Encoder input resolution — SigLip2 native size, independent of TILE_SIZE. */
 const ENCODER_SIZE = 768;
 const PATCH_SIZE = 16;
-const DOWNSAMPLE = 2;
+// Effective downsample: 768px / 16px patch / 16 patches_per_side = 3
+// Matches num_patches: 256 (16×16) in vision_config.
+const DOWNSAMPLE = 3;
 
 const IMAGE_MEAN = [0.5, 0.5, 0.5];
 const IMAGE_STD  = [0.5, 0.5, 0.5];
