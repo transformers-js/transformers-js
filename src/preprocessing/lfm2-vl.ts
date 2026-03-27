@@ -10,9 +10,9 @@ const IMAGE_MEAN = [0.5, 0.5, 0.5];
 const IMAGE_STD  = [0.5, 0.5, 0.5];
 
 export interface VLImageTensors {
-    /** community: [num_tiles, MAX_PATCHES, PATCH_DIM]; liquidai: [num_tiles, 3, 512, 512] */
+    /** [num_tiles, MAX_PATCHES, PATCH_DIM] — NaFlex patch sequence */
     pixelValues:         Float32Array;
-    /** community: [num_tiles, MAX_PATCHES]; liquidai: [num_tiles, 512, 512] */
+    /** [num_tiles, MAX_PATCHES] — 1 for valid patches, 0 for padding */
     pixelAttentionMask:  BigInt64Array;
     /** [num_tiles, 2] — [patches_h, patches_w] per tile */
     spatialShapes:       BigInt64Array;
@@ -71,82 +71,20 @@ async function tileToPatches(image: ImageData): Promise<{ patches: Float32Array;
     return { patches, mask: new BigInt64Array(MAX_PATCHES).fill(1n) };
 }
 
-/**
- * Resize a tile to 512×512, rescale, normalize, then convert HWC→CHW.
- * Returns chw [3, 512, 512] and mask [512×512] of 1n.
- */
-async function tileToCHW(image: ImageData): Promise<{ chw: Float32Array; mask: BigInt64Array }> {
-    const resized    = await resize(image, { width: TILE_SIZE, height: TILE_SIZE }, "bilinear");
-    const rescaled   = rescale(resized, 1 / 255);
-    const normalized = normalize(rescaled, IMAGE_MEAN, IMAGE_STD);
-
-    const { data } = normalized; // HWC [512, 512, 3]
-    const H = TILE_SIZE, W = TILE_SIZE, C = 3;
-    const chw = new Float32Array(C * H * W);
-    for (let c = 0; c < C; c++) {
-        for (let h = 0; h < H; h++) {
-            for (let w = 0; w < W; w++) {
-                chw[c * H * W + h * W + w] = data[(h * W + w) * C + c]!;
-            }
-        }
-    }
-    return { chw, mask: new BigInt64Array(H * W).fill(1n) };
-}
-
 export async function preprocessVLImage(
     image: ImageData,
     maxTiles = 10,
     useThumbnail = false,
-    flavor: "liquidai" | "community" = "community",
+    _flavor: "liquidai" | "community" = "community",
 ): Promise<VLImageTensors> {
     const maxContent = useThumbnail ? maxTiles - 1 : maxTiles;
     const [rows, cols] = bestTiling(image.width, image.height, maxContent);
 
-    const cropW = Math.floor(image.width  / cols);
-    const cropH = Math.floor(image.height / rows);
-
-    if (flavor === "liquidai") {
-        const chwArrays:  Float32Array[]   = [];
-        const maskArrays: BigInt64Array[] = [];
-
-        for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-                const left   = c * cropW;
-                const top    = r * cropH;
-                const right  = c < cols - 1 ? left + cropW : image.width;
-                const bottom = r < rows - 1 ? top  + cropH : image.height;
-                const { chw, mask } = await tileToCHW(crop(image, { left, top, right, bottom }));
-                chwArrays.push(chw);
-                maskArrays.push(mask);
-            }
-        }
-        if (useThumbnail) {
-            const { chw, mask } = await tileToCHW(image);
-            chwArrays.push(chw);
-            maskArrays.push(mask);
-        }
-
-        const numTiles = chwArrays.length;
-        const tilePixels = 3 * TILE_SIZE * TILE_SIZE;
-        const pixelValues = new Float32Array(numTiles * tilePixels);
-        const pixelAttentionMask = new BigInt64Array(numTiles * TILE_SIZE * TILE_SIZE);
-        for (let i = 0; i < numTiles; i++) {
-            pixelValues.set(chwArrays[i]!, i * tilePixels);
-            pixelAttentionMask.set(maskArrays[i]!, i * TILE_SIZE * TILE_SIZE);
-        }
-
-        const spatialShapes = new BigInt64Array(numTiles * 2);
-        for (let i = 0; i < numTiles; i++) {
-            spatialShapes[i * 2]     = BigInt(PATCHES_PER_SIDE);
-            spatialShapes[i * 2 + 1] = BigInt(PATCHES_PER_SIDE);
-        }
-
-        return { pixelValues, pixelAttentionMask, spatialShapes, numTiles };
-    }
-
-    // community: NaFlex patch format
     const patchArrays: Float32Array[]  = [];
     const maskArrays:  BigInt64Array[] = [];
+
+    const cropW = Math.floor(image.width  / cols);
+    const cropH = Math.floor(image.height / rows);
 
     for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {

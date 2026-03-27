@@ -50,8 +50,19 @@ transformers cannot. It is the core architectural reason this runtime exists.
    Phase breakdown (median): preprocess 96ms | vision_encoder 7,542ms | embed_tokens 16ms |
    decoder_prefill 3,551ms. See `benchmark/lfm2-vl.html`.
    Note: community export uses standard SigLip2 NaFlex (1024 patches, 12 layers) which is
-   not optimised for browser. Vision encoder is 68% of TTFT. A LiquidAI-optimised export
-   could reduce this significantly. Not suitable for interactive UX at current speed.
+   not optimised for browser. Vision encoder is 68% of TTFT. Not suitable for interactive UX.
+
+6. **LFM2.5-VL-1.6B-q4 latency** (WebGPU, Chrome, M-series Mac):
+   TTFT:   median ≤42,000ms — vision encoder (~30s) + decoder prefill (~9s).
+   Decode: median ≤150ms/token.
+   Measured: TTFT medians 38,837/39,558/39,362ms (3 sessions, 5 runs each after 1 warmup,
+   model `LiquidAI/LFM2.5-VL-1.6B-ONNX`). Decode medians 90/132ms/token (2 of 3 sessions;
+   3rd hit WebGPU buffer error in decode phase).
+   Phase breakdown (median): preprocess ~110ms | vision_encoder ~30,000ms | embed_tokens ~35ms |
+   decoder_prefill ~9,000ms. See `benchmark/lfm2-vl.html`.
+   Note: LiquidAI export does NOT have a better-optimised vision encoder for browser. Vision encoder
+   is ~4x slower than the 450M community export (30s vs 7.5s). Decode scales 3x with parameter count
+   (90–132ms/token vs 30ms/token). Not suitable for interactive UX — worse than 450M on all metrics.
 
 6. **Preprocessing sync lag**: automated, ≤ 24h from Liquid AI model update to JS PR.
 
@@ -71,7 +82,7 @@ interoperability with this runtime.
 | LFM2-350M | onnx-community/LFM2-350M-ONNX | Text generation | Working |
 | LFM2-2.6B | onnx-community/LFM2-2.6B-ONNX | Text generation | Untested |
 | LFM2-VL-450M | onnx-community/LFM2-VL-450M-ONNX | Vision-language | Working |
-| LFM2.5-VL-1.6B | LiquidAI/LFM2.5-VL-1.6B-ONNX | Vision-language | Untested |
+| LFM2.5-VL-1.6B | LiquidAI/LFM2.5-VL-1.6B-ONNX | Vision-language | Working |
 | LFM2-VL-3B | onnx-community/LFM2-VL-3B-ONNX | Vision-language | Untested |
 | LFM2-MoE-8B-A1B | onnx-community/LFM2-8B-A1B-ONNX | Text generation | Needs design |
 | LFM2.5-Audio-1.5B | LiquidAI/LFM2.5-Audio-1.5B-ONNX | ASR/TTS | Not started |
@@ -167,9 +178,9 @@ codegen/          Python→JS translator and HF sync workflow
 
 1. **Verify specialized fine-tunes** — same architecture as base, should work without code changes.
    Test: `LiquidAI/LFM2-1.2B-Tool-ONNX` (or RAG/Math/Extract), run a chat, confirm output.
-2. **VL export quality** — community VL export TTFT is 11s (vision encoder 7.5s, prefill 3.5s),
-   not suitable for interactive UX. LiquidAI optimised VL export could reduce significantly.
-   Check if `LiquidAI/LFM2.5-VL-1.6B-ONNX` has a better-optimised vision encoder.
+2. **VL export quality** — both community (450M) and LiquidAI (1.6B) VL exports are unusable for
+   interactive UX (11s and 39s TTFT). Vision encoder dominates both. Need a browser-optimised
+   vision encoder export (fewer patches, fewer layers, or int8). Not currently available.
 3. **Speculative decoding** — 350M draft + 2.6B verifier. High UX leverage: 2.6B quality at near-350M
    cost. Requires new generation loop design.
 4. **IOBinding / GPU buffer optimization** — keep KV+conv cache tensors on GPU between decode steps.

@@ -104,42 +104,27 @@ export class LFM2VLForConditionalGeneration {
         }
         const [decoderFile, decoderDataFile] = decoderFiles;
 
-        // LiquidAI embed_tokens is self-contained (no .onnx_data); community has external data.
         const embedTokensFile = "onnx/embed_tokens_fp16.onnx";
-        const embedTokensDataFile = flavor === "community" ? "onnx/embed_tokens_fp16.onnx_data" : null;
+        const embedTokensDataFile = "onnx/embed_tokens_fp16.onnx_data";
 
-        const fetchList: Promise<ArrayBuffer>[] = [
+        const config = await fetchJSON<VLConfig>(modelId, "config.json", mirrorBaseUrl);
+        const [tokenizer, visionBuffer, visionDataBuffer, embedTokensBuffer, embedTokensDataBuffer, decoderBuffer, decoderDataBuffer] = await Promise.all([
+            LFM2Tokenizer.fromHub(modelId, mirrorBaseUrl),
             fetchRaw(modelId, visionFile, mirrorBaseUrl),
             fetchRaw(modelId, visionDataFile, mirrorBaseUrl),
             fetchRaw(modelId, embedTokensFile, mirrorBaseUrl),
+            fetchRaw(modelId, embedTokensDataFile, mirrorBaseUrl),
             fetchRaw(modelId, decoderFile, mirrorBaseUrl),
             fetchRaw(modelId, decoderDataFile, mirrorBaseUrl),
-        ];
-        if (embedTokensDataFile) fetchList.splice(3, 0, fetchRaw(modelId, embedTokensDataFile, mirrorBaseUrl));
-
-        const config = await fetchJSON<VLConfig>(modelId, "config.json", mirrorBaseUrl);
-        const [tokenizer, ...buffers] = await Promise.all([
-            LFM2Tokenizer.fromHub(modelId, mirrorBaseUrl),
-            ...fetchList,
         ]);
-
-        let idx = 0;
-        const visionBuffer     = buffers[idx++]!;
-        const visionDataBuffer = buffers[idx++]!;
-        const embedTokensBuffer = buffers[idx++]!;
-        const embedTokensDataBuffer = embedTokensDataFile ? buffers[idx++]! : null;
-        const decoderBuffer    = buffers[idx++]!;
-        const decoderDataBuffer = buffers[idx++]!;
-
-        const embedTokensExtData = embedTokensDataBuffer
-            ? [{ path: "embed_tokens_fp16.onnx_data", data: embedTokensDataBuffer }]
-            : undefined;
 
         const [embedImagesSession, embedTokensSession, decoderSession] = await Promise.all([
             ONNXSession.load(visionBuffer, device, [
                 { path: visionDataFile.split("/").pop()!, data: visionDataBuffer },
             ]),
-            ONNXSession.load(embedTokensBuffer, device, embedTokensExtData),
+            ONNXSession.load(embedTokensBuffer, device, [
+                { path: "embed_tokens_fp16.onnx_data", data: embedTokensDataBuffer },
+            ]),
             ONNXSession.load(decoderBuffer, device, [
                 { path: decoderDataFile.split("/").pop()!, data: decoderDataBuffer },
             ]),
@@ -180,25 +165,15 @@ export class LFM2VLForConditionalGeneration {
         const t1 = t?.();
 
         // Dispatch to the correct vision encoder input format.
-        let imgOut: Record<string, { data: unknown; dims: readonly number[] }>;
-        if (this.flavor === "liquidai") {
-            // CHW image format: [num_tiles, 3, 512, 512]
-            imgOut = await this.embedImages.run({
-                pixel_values:         { data: pixelValues,        dims: [numTiles, 3, 512, 512] },
-                pixel_attention_mask: { data: pixelAttentionMask, dims: [numTiles, 512, 512] },
-                spatial_shapes:       { data: spatialShapes,       dims: [numTiles, 2] },
-            });
-        } else {
-            // NaFlex patch format: [num_tiles, max_patches, patch_dim]
-            const MAX_PATCHES = 1024, PATCH_DIM = 768;
-            imgOut = await this.embedImages.run({
-                pixel_values:         { data: pixelValues,        dims: [numTiles, MAX_PATCHES, PATCH_DIM] },
-                pixel_attention_mask: { data: pixelAttentionMask, dims: [numTiles, MAX_PATCHES] },
-                spatial_shapes:       { data: spatialShapes,       dims: [numTiles, 2] },
-            });
-        }
-
+        // Both liquidai and community use NaFlex patch format: [num_tiles, max_patches, patch_dim]
+        const MAX_PATCHES = 1024, PATCH_DIM = 768;
+        const imgOut = await this.embedImages.run({
+            pixel_values:         { data: pixelValues,        dims: [numTiles, MAX_PATCHES, PATCH_DIM] },
+            pixel_attention_mask: { data: pixelAttentionMask, dims: [numTiles, MAX_PATCHES] },
+            spatial_shapes:       { data: spatialShapes,       dims: [numTiles, 2] },
+        });
         const imageFeatures = imgOut["image_features"]!.data as Float32Array;
+
         const imgEmbedTokens = imageFeatures.length / this.hiddenSize;
         const t2 = t?.();
 
