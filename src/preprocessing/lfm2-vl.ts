@@ -75,7 +75,6 @@ export async function preprocessVLImage(
     image: ImageData,
     maxTiles = 10,
     useThumbnail = false,
-    _flavor: "liquidai" | "community" = "community",
 ): Promise<VLImageTensors> {
     const maxContent = useThumbnail ? maxTiles - 1 : maxTiles;
     const [rows, cols] = bestTiling(image.width, image.height, maxContent);

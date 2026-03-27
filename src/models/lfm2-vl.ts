@@ -46,11 +46,11 @@ interface VLConfig {
 }
 
 /**
- * LiquidAI official exports and onnx-community exports use different file
- * naming conventions and different vision encoder input formats.
+ * LiquidAI and onnx-community exports differ only in file naming conventions
+ * and available precision options. Both use NaFlex patch format [N,1024,768].
  *
- * liquidai:  embed_images_fp16.onnx | decoder_q4.onnx | CHW images [N,3,512,512]
- * community: vision_encoder_fp16.onnx | decoder_model_merged_q4.onnx | NaFlex patches [N,1024,768]
+ * liquidai:  embed_images_fp16.onnx | decoder_q4/q8/fp16.onnx
+ * community: vision_encoder_fp16.onnx | decoder_model_merged_q4/q4f16/fp16.onnx
  */
 type VLExportFlavor = "liquidai" | "community";
 
@@ -87,7 +87,6 @@ export class LFM2VLForConditionalGeneration {
         private readonly imageTokenId: number,
         private readonly maxTiles: number,
         private readonly useThumbnail: boolean,
-        private readonly flavor: VLExportFlavor,
         private readonly hasPositionIds: boolean,
         private readonly hiddenSize: number,
         private readonly decoderInputNames: string[],
@@ -143,7 +142,6 @@ export class LFM2VLForConditionalGeneration {
             config.image_token_id,
             config.max_tiles,
             config.use_thumbnail ?? false,
-            flavor,
             decInputNames.includes("position_ids"),
             textCfg.hidden_size,
             decInputNames,
@@ -161,11 +159,10 @@ export class LFM2VLForConditionalGeneration {
         // ── 1. Image preprocessing ─────────────────────────────────────────
         const t0 = t?.();
         const { pixelValues, pixelAttentionMask, spatialShapes, numTiles } =
-            await preprocessVLImage(image, this.maxTiles, this.useThumbnail, this.flavor);
+            await preprocessVLImage(image, this.maxTiles, this.useThumbnail);
         const t1 = t?.();
 
-        // Dispatch to the correct vision encoder input format.
-        // Both liquidai and community use NaFlex patch format: [num_tiles, max_patches, patch_dim]
+        // NaFlex patch format: [num_tiles, max_patches, patch_dim]
         const MAX_PATCHES = 1024, PATCH_DIM = 768;
         const imgOut = await this.embedImages.run({
             pixel_values:         { data: pixelValues,        dims: [numTiles, MAX_PATCHES, PATCH_DIM] },
