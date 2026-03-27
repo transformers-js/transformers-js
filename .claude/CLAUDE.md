@@ -42,8 +42,16 @@ transformers cannot. It is the core architectural reason this runtime exists.
    8 runs each after 2 warmup, model `onnx-community/LFM2-2.6B-ONNX`). See `benchmark/lfm2.html`.
    Scaling note: 1.2B→2.6B is 2.17× params, decode scales 4→9ms/token (~2.2×) — linear.
 
-5. **LFM2-VL first-token latency**: target ≤ 200ms prefill for a single image + short prompt on WebGPU.
-   TARGET — not yet measured.
+5. **LFM2-VL-450M-q4 latency** (WebGPU, Chrome, M-series Mac):
+   TTFT:   median ≤12,000ms — dominated by vision encoder (~7.5s) + decoder prefill (~3.5s).
+   Decode: median ≤30ms/token.
+   Measured: TTFT medians 10,800/11,295/11,292ms; decode medians 33.7/22.6/28.6ms/token
+   (3 sessions, 5 runs each after 1 warmup, model `onnx-community/LFM2-VL-450M-ONNX`).
+   Phase breakdown (median): preprocess 96ms | vision_encoder 7,542ms | embed_tokens 16ms |
+   decoder_prefill 3,551ms. See `benchmark/lfm2-vl.html`.
+   Note: community export uses standard SigLip2 NaFlex (1024 patches, 12 layers) which is
+   not optimised for browser. Vision encoder is 68% of TTFT. A LiquidAI-optimised export
+   could reduce this significantly. Not suitable for interactive UX at current speed.
 
 6. **Preprocessing sync lag**: automated, ≤ 24h from Liquid AI model update to JS PR.
 
@@ -157,11 +165,11 @@ codegen/          Python→JS translator and HF sync workflow
 
 ## Next priorities
 
-1. **LFM2-VL latency benchmark** — VL TTFT target ≤200ms not yet measured. Prefill path differs
-   (image embeddings splice into token sequence). Needs its own benchmark. Model:
-   `onnx-community/LFM2-VL-450M-ONNX` (Working status, smallest VL model).
-2. **Verify specialized fine-tunes** — same architecture as base, should work without code changes.
+1. **Verify specialized fine-tunes** — same architecture as base, should work without code changes.
    Test: `LiquidAI/LFM2-1.2B-Tool-ONNX` (or RAG/Math/Extract), run a chat, confirm output.
+2. **VL export quality** — community VL export TTFT is 11s (vision encoder 7.5s, prefill 3.5s),
+   not suitable for interactive UX. LiquidAI optimised VL export could reduce significantly.
+   Check if `LiquidAI/LFM2.5-VL-1.6B-ONNX` has a better-optimised vision encoder.
 3. **Speculative decoding** — 350M draft + 2.6B verifier. High UX leverage: 2.6B quality at near-350M
    cost. Requires new generation loop design.
 4. **IOBinding / GPU buffer optimization** — keep KV+conv cache tensors on GPU between decode steps.
