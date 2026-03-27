@@ -128,7 +128,7 @@ export class LFM2VLForConditionalGeneration {
         options: VLGenerateOptions = {},
     ): Promise<string> {
         const { maxNewTokens = 512, sampling } = options;
-        const t = (options.timing != null) ? performance.now : null;
+        const t = options.timing != null ? () => performance.now() : null;
 
         // ── 1. Image preprocessing ─────────────────────────────────────────
         const t0 = t?.();
