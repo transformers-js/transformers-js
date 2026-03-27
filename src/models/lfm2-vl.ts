@@ -133,7 +133,7 @@ export class LFM2VLForConditionalGeneration {
             const imgOut = await this.embedImages.run({
                 pixel_values:         { data: pixelValues.subarray(i * TILE_PX, (i + 1) * TILE_PX),       dims: [3, ENC, ENC] },
                 pixel_attention_mask: { data: pixelAttentionMask.subarray(i * MASK_PX, (i + 1) * MASK_PX), dims: [ENC, ENC] },
-                spatial_shapes:       { data: spatialShapes.subarray(i * 2, (i + 1) * 2),                  dims: [2] },
+                spatial_shapes:       { data: spatialShapes.subarray(i * 2, (i + 1) * 2),                  dims: [1, 2] },
             });
             tileFeatureArrays.push(imgOut["image_features"]!.data as Float32Array);
         }

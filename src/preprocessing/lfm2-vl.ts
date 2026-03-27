@@ -4,6 +4,8 @@ import { resize, rescale, normalize, hwcToChw, crop, type ImageData } from "./op
 const TILE_SIZE = 512;
 /** Encoder input resolution — SigLip2 native size, independent of TILE_SIZE. */
 const ENCODER_SIZE = 768;
+const PATCH_SIZE = 16;
+const DOWNSAMPLE = 2;
 
 const IMAGE_MEAN = [0.5, 0.5, 0.5];
 const IMAGE_STD  = [0.5, 0.5, 0.5];
@@ -87,7 +89,12 @@ export async function preprocessVLImage(
     // Attention mask and spatial shapes are kept for LiquidAI exports that expect them.
     // Community exports filter them out via inputNames validation.
     const pixelAttentionMask = new BigInt64Array(numTiles * ENCODER_SIZE * ENCODER_SIZE).fill(1n);
+    const patchesPerSide = BigInt(ENCODER_SIZE / PATCH_SIZE / DOWNSAMPLE); // 768/16/2 = 24
     const spatialShapes = new BigInt64Array(numTiles * 2);
+    for (let i = 0; i < numTiles; i++) {
+        spatialShapes[i * 2]     = patchesPerSide;
+        spatialShapes[i * 2 + 1] = patchesPerSide;
+    }
 
     return { pixelValues, pixelAttentionMask, spatialShapes, numTiles };
 }
