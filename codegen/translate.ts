@@ -5,11 +5,9 @@ import { join } from "node:path";
 // Uses GitHub Models API (models.github.ai) so only GITHUB_TOKEN is needed —
 // no separate ANTHROPIC_API_KEY. GITHUB_TOKEN is auto-provisioned in Actions.
 //
-// Tradeoff: GitHub Models speaks OpenAI-compatible chat completions, so
-// Anthropic-native features (adaptive thinking, extended thinking budgets)
-// are not available here. If translation quality degrades on complex
-// processors, consider switching to @anthropic-ai/sdk with a direct
-// ANTHROPIC_API_KEY and re-enabling thinking: { type: "adaptive" }.
+// Using openai/gpt-4o: Claude models are not currently available on the
+// GitHub Models endpoint. If translation quality degrades on complex
+// processors, switch to @anthropic-ai/sdk with a direct ANTHROPIC_API_KEY.
 const client = new OpenAI({
     baseURL: "https://models.github.ai/inference",
     apiKey: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? "",
@@ -22,7 +20,7 @@ const SYSTEM_PROMPT = readFileSync(
 
 export async function translate(pythonSource: string, sourcePath: string): Promise<string> {
     const response = await client.chat.completions.create({
-        model: "claude-opus-4-6",
+        model: "openai/gpt-4o",
         max_tokens: 8192,
         messages: [
             { role: "system", content: SYSTEM_PROMPT },
