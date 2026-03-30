@@ -70,6 +70,12 @@ Collect every changed filename that matches ALL of:
 
 Deduplicate across commits. If no files match, update `.last-sync` to the newest commit SHA and stop with "No LFM preprocessing files changed."
 
+## Step 3b: Skip hand-maintained files
+
+Some preprocessing files in `src/preprocessing/` are hand-maintained and must not be overwritten by this workflow. Before translating, check whether a file already exists in `src/preprocessing/` whose name matches the model — either with hyphens or underscores (e.g. `lfm2-vl.ts` and `lfm2_vl.ts` are the same model). To check, read the directory listing of `src/preprocessing/`.
+
+For each matched Python file, derive the output filename (using the mapping in Step 4). Check if a file with that name (or its hyphen/underscore variant) exists in `src/preprocessing/`. If the existing file does NOT contain the line `@generated`, it is hand-maintained — skip translation for that file and note it in the PR body under a **"Skipped (hand-maintained)"** section. Only translate files whose output path either does not exist yet, or already contains `@generated`.
+
 ## Step 4: Translate each file
 
 For each matched Python file, fetch its current content:
@@ -116,6 +122,8 @@ Decode the base64 `content` field. Translate the Python to TypeScript using the 
 | `np.pad(arr, padding)` | `pad(img, padding)` |
 
 **Do NOT translate**: `from_pretrained()`, `__call__()` dispatch, logging, deprecation notices, docstring decorators.
+
+**NEVER stub**: Every method that contains logic must be fully translated. Never write `throw new Error("not yet implemented")` or leave a method body empty. If a method is complex, translate it completely — complexity is not a reason to stub.
 
 **Output path mapping**:
 `src/transformers/models/{model}/image_processing_{model}.py` → `src/preprocessing/{model}.ts`

@@ -61,6 +61,10 @@ Import all utilities from `"../ops.js"`. Import types from `"../base.js"`.
 - `_preprocess_image()` boilerplate that only delegates to individual steps
 - Any `@add_start_docstrings` or docstring decorators
 
+## NEVER stub
+
+Every method that contains logic must be fully translated. Never write `throw new Error("not yet implemented")` or leave a method body empty. If a method is complex, translate it completely — complexity is not a reason to stub.
+
 ## Example
 
 Input (Python excerpt):
