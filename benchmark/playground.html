@@ -589,6 +589,29 @@ main {
       </div>
     </div>
 
+    <!-- ── Fast Chat (LFM2.5 350M) ── -->
+    <div class="card" id="card-sm25">
+      <div class="card-header">
+        <div class="card-meta">
+          <div class="card-row">
+            <span class="card-name">Fast Chat</span>
+            <span class="tag">LFM2.5 350M</span>
+          </div>
+          <div class="card-desc">Official LFM2.5 350M — same size, newer architecture.</div>
+        </div>
+        <span class="card-size">~276 MB</span>
+        <button class="btn" id="btn-sm25" onclick="loadModel('sm25')">Load</button>
+      </div>
+      <div class="card-demo" id="demo-sm25">
+        <div class="chat-messages" id="sm25-messages"></div>
+        <div class="chat-input-row">
+          <textarea class="chat-input" id="sm25-input" placeholder="Type a message…"
+            rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendSM25()}"></textarea>
+          <button class="btn btn-primary" id="sm25-send" onclick="sendSM25()">Send</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Text Generation ── -->
     <div class="card" id="card-tg">
       <div class="card-header">
@@ -742,6 +765,7 @@ window.onTokenInput = function(value) { setHFToken(value); };
 // ── State ─────────────────────────────────────────────────────────────────
 const pipes = {};
 const smHistory    = [];
+const sm25History  = [];
 const tgHistory    = [];
 const thinkHistory = [];
 const toolHistory  = [];
@@ -761,6 +785,12 @@ window.loadModel = async function(id) {
                 device, precision: 'q4',
             });
             activateCard('sm');
+        } else if (id === 'sm25') {
+            pipes.sm25 = await pipeline('text-generation', {
+                model: 'LiquidAI/LFM2.5-350M-ONNX',
+                device, precision: 'q4',
+            });
+            activateCard('sm25');
         } else if (id === 'md') {
             pipes.md = await pipeline('text-generation', {
                 model: 'LiquidAI/LFM2.5-0.4B-Instruct-ONNX',
@@ -937,6 +967,33 @@ function renderSimpleChat(elId, history) {
     `).join('');
     el.scrollTop = el.scrollHeight;
 }
+
+// ── Fast Chat (LFM2.5 350M) ───────────────────────────────────────────────
+window.sendSM25 = async function() {
+    const input   = document.getElementById('sm25-input');
+    const sendBtn = document.getElementById('sm25-send');
+    const text = input.value.trim();
+    if (!text || !pipes.sm25) return;
+
+    input.value = '';
+    input.disabled = true;
+    sendBtn.disabled = true;
+
+    sm25History.push({ role: 'user', content: text });
+    renderSimpleChat('sm25-messages', sm25History);
+
+    try {
+        const reply = await pipes.sm25.run([...sm25History]);
+        sm25History.push({ role: 'assistant', content: reply });
+    } catch (err) {
+        sm25History.push({ role: 'assistant', content: `Error: ${err instanceof Error ? err.message : String(err)}` });
+    }
+
+    renderSimpleChat('sm25-messages', sm25History);
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+};
 
 // ── Text Generation ───────────────────────────────────────────────────────
 window.sendTG = async function() {
