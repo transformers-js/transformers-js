@@ -79,6 +79,7 @@ interoperability with this runtime.
 | Model | ONNX | Task | Status |
 |-------|------|------|--------|
 | LFM2.5-1.2B-Instruct | LiquidAI/LFM2.5-1.2B-Instruct-ONNX | Text generation | Working |
+| LFM2.5-350M | LiquidAI/LFM2.5-350M-ONNX | Text generation | Untested |
 | LFM2-350M | onnx-community/LFM2-350M-ONNX | Text generation | Working |
 | LFM2-2.6B | onnx-community/LFM2-2.6B-ONNX | Text generation | Untested |
 | LFM2-VL-450M | onnx-community/LFM2-VL-450M-ONNX | Vision-language | Working |
