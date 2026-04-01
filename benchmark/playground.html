@@ -566,29 +566,6 @@ main {
       </div>
     </div>
 
-    <!-- ── Fast Chat (350M) ── -->
-    <div class="card" id="card-sm">
-      <div class="card-header">
-        <div class="card-meta">
-          <div class="card-row">
-            <span class="card-name">Fast Chat</span>
-            <span class="tag">LFM2 350M</span>
-          </div>
-          <div class="card-desc">Smallest public LFM2 — fastest to load, runs entirely in-browser.</div>
-        </div>
-        <span class="card-size">~300 MB</span>
-        <button class="btn" id="btn-sm" onclick="loadModel('sm')">Load</button>
-      </div>
-      <div class="card-demo" id="demo-sm">
-        <div class="chat-messages" id="sm-messages"></div>
-        <div class="chat-input-row">
-          <textarea class="chat-input" id="sm-input" placeholder="Type a message…"
-            rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendSM()}"></textarea>
-          <button class="btn btn-primary" id="sm-send" onclick="sendSM()">Send</button>
-        </div>
-      </div>
-    </div>
-
     <!-- ── Fast Chat (LFM2.5 350M) ── -->
     <div class="card" id="card-sm25">
       <div class="card-header">
@@ -764,7 +741,6 @@ window.onTokenInput = function(value) { setHFToken(value); };
 
 // ── State ─────────────────────────────────────────────────────────────────
 const pipes = {};
-const smHistory    = [];
 const sm25History  = [];
 const tgHistory    = [];
 const thinkHistory = [];
@@ -779,13 +755,7 @@ window.loadModel = async function(id) {
     btn.innerHTML = `<span class="spinner spinner-sm"></span> Loading…`;
 
     try {
-        if (id === 'sm') {
-            pipes.sm = await pipeline('text-generation', {
-                model: 'onnx-community/LFM2-350M-ONNX',
-                device, precision: 'q4',
-            });
-            activateCard('sm');
-        } else if (id === 'sm25') {
+        if (id === 'sm25') {
             pipes.sm25 = await pipeline('text-generation', {
                 model: 'LiquidAI/LFM2.5-350M-ONNX',
                 device, precision: 'q4',
@@ -928,34 +898,6 @@ function renderBars(container, results) {
         </div>
     `).join('');
 }
-
-// ── Fast Chat (350M) ─────────────────────────────────────────────────────
-window.sendSM = async function() {
-    const input   = document.getElementById('sm-input');
-    const sendBtn = document.getElementById('sm-send');
-    const text = input.value.trim();
-    if (!text || !pipes.sm) return;
-
-    input.value = '';
-    input.disabled = true;
-    sendBtn.disabled = true;
-
-    smHistory.push({ role: 'user', content: text });
-    renderSimpleChat('sm-messages', smHistory);
-
-    try {
-        const reply = await pipes.sm.run([...smHistory]);
-        smHistory.push({ role: 'assistant', content: reply });
-    } catch (err) {
-        smHistory.push({ role: 'assistant', content: `Error: ${err instanceof Error ? err.message : String(err)}` });
-    }
-
-    renderSimpleChat('sm-messages', smHistory);
-    input.disabled = false;
-    sendBtn.disabled = false;
-    input.focus();
-};
-
 
 function renderSimpleChat(elId, history) {
     const el = document.getElementById(elId);
