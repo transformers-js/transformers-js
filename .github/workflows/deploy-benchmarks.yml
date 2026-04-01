@@ -39,10 +39,12 @@ jobs:
           cp benchmark/playground.html _site/index.html
           cp benchmark/dist/playground.js _site/dist/playground.js
 
-          # Latency benchmark → /benchmarks/
+          # Benchmarks → /benchmarks/
           mkdir -p _site/benchmarks/dist
-          cp benchmark/latency.html _site/benchmarks/latency.html
-          cp benchmark/dist/latency.js _site/benchmarks/dist/latency.js
+          cp benchmark/lfm2.html _site/benchmarks/lfm2.html
+          cp benchmark/dist/lfm2.js _site/benchmarks/dist/lfm2.js
+          cp benchmark/lfm2-vl.html _site/benchmarks/lfm2-vl.html
+          cp benchmark/dist/lfm2-vl.js _site/benchmarks/dist/lfm2-vl.js
 
           cd _site
           git config user.name "github-actions[bot]"
